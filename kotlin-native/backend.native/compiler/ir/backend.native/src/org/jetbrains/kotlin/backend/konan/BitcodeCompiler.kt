@@ -7,6 +7,7 @@ package org.jetbrains.kotlin.backend.konan
 
 import org.jetbrains.kotlin.backend.konan.driver.NativeBackendPhaseContext
 import org.jetbrains.kotlin.config.nativeBinaryOptions.BinaryOptions
+import org.jetbrains.kotlin.config.nativeBinaryOptions.GCStackMapScheme
 import org.jetbrains.kotlin.konan.config.overrideClangOptions
 import org.jetbrains.kotlin.konan.exec.Command
 import org.jetbrains.kotlin.konan.target.*
@@ -54,6 +55,9 @@ internal class BitcodeCompiler(
         val flags = overrideClangOptions.takeIf(List<String>::isNotEmpty)
                 ?: mutableListOf<String>().apply {
                     addNonEmpty(configurables.clangFlags)
+                    if (config.gcStackMapScheme == GCStackMapScheme.DELTA_MAIN) {
+                        addNonEmpty(listOf("-mllvm", "-force-rewrite-statepoints-for-gc"))
+                    }
                     addNonEmpty(listOf("-triple", targetTriple.toString()))
                     addNonEmpty(when {
                         optimize -> configurables.clangOptFlags
