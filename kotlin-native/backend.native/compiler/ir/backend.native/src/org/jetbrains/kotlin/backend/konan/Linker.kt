@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.backend.konan.util.toObsoleteKind
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.config.nativeBinaryOptions.AndroidProgramType
 import org.jetbrains.kotlin.config.nativeBinaryOptions.BinaryOptions
+import org.jetbrains.kotlin.config.nativeBinaryOptions.GCStackMapScheme
 import org.jetbrains.kotlin.konan.KonanExternalToolFailure
 import org.jetbrains.kotlin.konan.TempFiles
 import org.jetbrains.kotlin.konan.config.NativeConfigurationKeys
@@ -20,7 +21,6 @@ import org.jetbrains.kotlin.library.uniqueName
 import kotlin.io.path.Path
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.createDirectories
-import kotlin.io.path.deleteExisting
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.name
 import kotlin.io.path.pathString
@@ -128,10 +128,14 @@ internal class Linker(
         }
         else -> {
             val flags = if (target.family.isAppleFamily) {
-                when (config.produce) {
+                val baseFlags = when (config.produce) {
                     CompilerOutputKind.DYNAMIC_CACHE -> listOf("-install_name", outputFiles.dynamicCacheInstallName)
                     else -> listOf("-dead_strip")
                 }
+                val stackMapFlags = if (config.gcStackMapScheme != GCStackMapScheme.DELTA_MAIN)
+                    listOf("-U", "__LLVM_StackMaps")
+                else emptyList()
+                baseFlags + stackMapFlags
             } else emptyList()
 
             ExecutableTarget(outputFiles.nativeBinaryFile, flags)
