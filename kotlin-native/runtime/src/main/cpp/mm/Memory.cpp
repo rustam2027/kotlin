@@ -166,7 +166,8 @@ extern "C" PERFORMANCE_INLINE RUNTIME_NOTHROW OBJ_GETTER(GetAndSetVolatileHeapRe
 }
 
 extern "C" PERFORMANCE_INLINE RUNTIME_NOTHROW void UpdateReturnRef(ObjHeader** returnSlot, const ObjHeader* object) {
-    if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) return
+    if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain)
+        return;
     UpdateStackRef(returnSlot, object);
 }
 
