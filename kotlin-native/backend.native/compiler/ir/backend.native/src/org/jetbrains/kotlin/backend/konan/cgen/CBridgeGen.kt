@@ -454,7 +454,8 @@ private fun <R> KotlinToCCallBuilder.handleArgumentForVarargParameter(
 private fun KotlinToCCallBuilder.emitCBridge() {
     val cLines = mutableListOf<String>()
 
-    cLines += "${bridgeBuilder.buildCSignature(cBridgeName)} {"
+    val noinlineAttribute = if (cFunctionBuilder.variadic) "__attribute__((noinline)) " else ""
+    cLines += "$noinlineAttribute${bridgeBuilder.buildCSignature(cBridgeName)} {"
     cLines += cBridgeBodyLines
     cLines += "}"
 
