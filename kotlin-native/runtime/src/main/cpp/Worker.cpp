@@ -208,7 +208,7 @@ void waitInNativeState(pthread_cond_t* cond, pthread_mutex_t* mutex) {
     kotlin::compactObjectPoolInCurrentThread();
     if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) {
         mm::KotlinFrameAnchor anchor = mm::captureCallerFrameAnchor();
-        mm::ThreadRegistry::Instance().CurrentThreadData()->pushStackMapAnchor(anchor.fp, anchor.pc);
+        mm::ThreadRegistry::Instance().CurrentThreadData()->pushStackMapAnchor(anchor);
     }
 
     CallWithThreadState<ThreadState::kNative>(pthread_cond_wait, cond, mutex);
