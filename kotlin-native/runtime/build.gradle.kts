@@ -502,7 +502,7 @@ bitcode {
                 test {}
             }
 
-            onlyIf { it.architecture == Architecture.ARM64 }
+            onlyIf { it.architecture == TargetArchitecture.ARM64 }
         }
 
         testsGroup("delta_main_stackmap_test") {
