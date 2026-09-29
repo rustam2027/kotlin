@@ -312,7 +312,7 @@ bitcode {
 
         module("legacy_alloc") {
             srcRoot.set(layout.projectDirectory.dir("src/alloc/legacy"))
-            headersDirs.from(files("src/main/cpp"))
+            headersDirs.from(files("src/main/cpp"), files("src/gc/stackmap/cpp"))
             sourceSets {
                 main {}
                 test {}
@@ -435,7 +435,7 @@ bitcode {
 
         module("same_thread_ms_gc") {
             srcRoot.set(layout.projectDirectory.dir("src/gc/stms"))
-            headersDirs.from(files("src/main/cpp"))
+            headersDirs.from(files("src/main/cpp"), files("src/gc/stackmap/cpp"))
             sourceSets {
                 main {}
                 testFixtures {}
@@ -455,7 +455,7 @@ bitcode {
 
         module("pmcs_gc") {
             srcRoot.set(layout.projectDirectory.dir("src/gc/pmcs"))
-            headersDirs.from(files("src/main/cpp"))
+            headersDirs.from(files("src/main/cpp"), files("src/gc/stackmap/cpp"))
             sourceSets {
                 main {}
                 testFixtures {}
