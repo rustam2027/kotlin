@@ -144,7 +144,7 @@ void collectRootSetFromMapForThread(GCHandle gcHandle, typename Traits::MarkQueu
         RuntimeLogDebug({logging::Tag::kGC}, "Start new anchor pc=%p fp=%p", anchor.pc, anchor.fp);
 
         while (anchor.fp != 0 && !stackMapBuilder.hasMapForPC(anchor.pc)) {
-            anchor = anchor.next;
+            anchor = anchor.next();
             RuntimeLogDebug({logging::Tag::kGC}, "Hop one frame up pc=%p fp=%p", anchor.pc, anchor.fp);
         }
 
