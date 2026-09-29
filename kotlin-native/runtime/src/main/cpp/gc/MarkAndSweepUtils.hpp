@@ -143,6 +143,9 @@ void collectRootSetFromMapForThread(GCHandle gcHandle, typename Traits::MarkQueu
     for (auto anchor : thread.frameAnchors()) {
         RuntimeLogDebug({logging::Tag::kGC}, "Start new anchor pc=%p fp=%p", anchor.pc, anchor.fp);
 
+        // The anchor may not point to a Kotlin frame. Walk up the frame chain until a frame
+        // has a stack map, or fp == 0. fp == 0 means the chain has no more frames and this
+        // thread has no Kotlin frame at all.
         while (anchor.fp != 0 && !stackMapBuilder.hasMapForPC(anchor.pc)) {
             anchor = anchor.next();
             RuntimeLogDebug({logging::Tag::kGC}, "Hop one frame up pc=%p fp=%p", anchor.pc, anchor.fp);
