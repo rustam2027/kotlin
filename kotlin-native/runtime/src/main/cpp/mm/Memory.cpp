@@ -227,7 +227,7 @@ extern "C" RUNTIME_NOTHROW ObjHeader** LookupTLS(void** key, int index) {
     return threadData->tls().Lookup(key, index);
 }
 
-extern "C" NO_INLINE void Kotlin_native_internal_GC_collect(ObjHeader*) {
+extern "C" void Kotlin_native_internal_GC_collect(ObjHeader*) {
 #if defined(__aarch64__)
     if (compiler::gcStackMapScheme() == compiler::GCStackMapScheme::kDeltaMain) {
         mm::KotlinFrameAnchor anchor = mm::captureCallerFrameAnchor();
@@ -404,16 +404,6 @@ extern "C" RUNTIME_NOTHROW PERFORMANCE_INLINE void Kotlin_mm_safePointWhileLoopB
     mm::safePoint();
 }
 
-#if defined(__aarch64__)
-extern "C" RUNTIME_NOTHROW ALWAYS_INLINE void Kotlin_mm_safePointFunctionPrologue_delta_main() {
-    mm::safePoint();
-}
-
-extern "C" RUNTIME_NOTHROW ALWAYS_INLINE void Kotlin_mm_safePointWhileLoopBody_delta_main() {
-    mm::safePoint();
-}
-#endif
-
 extern "C" PERFORMANCE_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateNative() {
     SwitchThreadState(mm::ThreadRegistry::Instance().CurrentThreadData(), ThreadState::kNative);
 }
@@ -423,7 +413,7 @@ extern "C" NO_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateNative_debu
 }
 
 #if defined(__aarch64__)
-extern "C" ALWAYS_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateNative_delta_main() {
+extern "C" NO_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateNative_delta_main() {
     mm::KotlinFrameAnchor anchor = mm::captureCallerFrameAnchor();
     mm::ThreadRegistry::Instance().CurrentThreadData()->pushStackMapAnchor(anchor);
     SwitchThreadState(mm::ThreadRegistry::Instance().CurrentThreadData(), ThreadState::kNative);
@@ -439,7 +429,7 @@ extern "C" NO_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateRunnable_de
 }
 
 #if defined(__aarch64__)
-extern "C" ALWAYS_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateRunnable_delta_main() {
+extern "C" NO_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateRunnable_delta_main() {
     SwitchThreadState(mm::ThreadRegistry::Instance().CurrentThreadData(), ThreadState::kRunnable);
     mm::ThreadRegistry::Instance().CurrentThreadData()->popStackMapAnchor();
 }

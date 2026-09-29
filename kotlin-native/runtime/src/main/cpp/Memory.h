@@ -243,7 +243,7 @@ void ClearTLS(MemoryState* memory) RUNTIME_NOTHROW;
 // Lookup element in TLS object storage.
 ObjHeader** LookupTLS(void** key, int index) RUNTIME_NOTHROW;
 
-NO_INLINE void Kotlin_native_internal_GC_collect(ObjHeader*);
+void Kotlin_native_internal_GC_collect(ObjHeader*);
 void Kotlin_native_internal_GC_setTuneThreshold(ObjHeader*, bool value);
 bool Kotlin_native_internal_GC_getTuneThreshold(ObjHeader*);
 RUNTIME_NOTHROW bool Kotlin_native_runtime_Debugging_dumpMemory(ObjHeader*, int fd);
@@ -260,19 +260,14 @@ NO_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateNative_debug();
 NO_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateRunnable_debug();
 #if defined(__aarch64__)
 // Sets state of the current thread to NATIVE (used to trace fp, pc for delta-main maps).
-ALWAYS_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateNative_delta_main();
+NO_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateNative_delta_main();
 // Sets state of the current thread to RUNNABLE (used to trace fp, pc for delta-main maps).
-ALWAYS_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateRunnable_delta_main();
+NO_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateRunnable_delta_main();
 #endif
 
 // Safe point callbacks from Kotlin code generator.
 void Kotlin_mm_safePointFunctionPrologue() RUNTIME_NOTHROW;
 void Kotlin_mm_safePointWhileLoopBody() RUNTIME_NOTHROW;
-#if defined(__aarch64__)
-// Safe point callbacks from Kotlin code generator (used to trace fp, pc for delta-main maps).
-ALWAYS_INLINE void Kotlin_mm_safePointFunctionPrologue_delta_main() RUNTIME_NOTHROW;
-ALWAYS_INLINE void Kotlin_mm_safePointWhileLoopBody_delta_main() RUNTIME_NOTHROW;
-#endif
 
 RUNTIME_NOTHROW void DisposeRegularWeakReferenceImpl(ObjHeader* counter);
 
@@ -386,12 +381,12 @@ public:
     ThreadStateGuard() : thread_(nullptr), oldState_(ThreadState::kNative), reentrant_(false) {}
 
     // Set the state for the given thread.
-    ALWAYS_INLINE ThreadStateGuard(MemoryState* thread, ThreadState state, bool reentrant = false) noexcept : thread_(thread), reentrant_(reentrant) {
+    ThreadStateGuard(MemoryState* thread, ThreadState state, bool reentrant = false) noexcept : thread_(thread), reentrant_(reentrant) {
         oldState_ = SwitchThreadState(thread_, state, reentrant_);
     }
 
     // Sets the state for the current thread.
-    ALWAYS_INLINE explicit ThreadStateGuard(ThreadState state, bool reentrant = false) noexcept
+    explicit ThreadStateGuard(ThreadState state, bool reentrant = false) noexcept
         : ThreadStateGuard(mm::GetMemoryState(), state, reentrant) {};
 
     ThreadStateGuard(ThreadStateGuard&& other) noexcept
@@ -399,7 +394,7 @@ public:
         other.thread_ = nullptr;
     }
 
-    ALWAYS_INLINE ~ThreadStateGuard() noexcept {
+    ~ThreadStateGuard() noexcept {
         if (thread_ != nullptr) {
             SwitchThreadState(thread_, oldState_, reentrant_);
         }

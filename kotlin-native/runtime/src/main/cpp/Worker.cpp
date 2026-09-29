@@ -20,7 +20,6 @@
 #include <set>
 #include <string.h>
 #include <stdio.h>
-#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -36,7 +35,6 @@
 #include "Runtime.h"
 #include "mm/ThreadData.hpp"
 #include "mm/ThreadRegistry.hpp"
-#include "mm/ThreadState.hpp"
 #include "Types.h"
 #include "Worker.h"
 #include "objc_support/AutoreleasePool.hpp"
@@ -206,28 +204,21 @@ namespace {
 
 THREAD_LOCAL_VARIABLE Worker* g_worker = nullptr;
 
-// Like `CallWithThreadState<ThreadState::kNative>`, but the Native->Runnable flip-back on exit
-// does not run the safepoint echo check. This thread may be idly waiting with zero Kotlin frames
-// on the stack (workerRoutine's idle loop), so there is no Kotlin frame for the echo to capture -
-// `WaitForThreadsSuspension`/`suspendedOrNative()` already treats a thread sitting in `kNative` as
-// GC-safe, and the thread re-checks via the safe point prologue once it reaches Kotlin code anyway.
-template <typename R, typename... Args>
-ALWAYS_INLINE R CallWithThreadStateNativeNoSafePointExit(R (*function)(Args...), Args... args) {
-    auto* threadData = mm::ThreadRegistry::Instance().CurrentThreadData();
-    auto oldState = SwitchThreadState(threadData, ThreadState::kNative);
-    if constexpr (std::is_void_v<R>) {
-        function(std::forward<Args>(args)...);
-        threadData->suspensionData().setStateNoSafePoint(oldState);
-    } else {
-        R result = function(std::forward<Args>(args)...);
-        threadData->suspensionData().setStateNoSafePoint(oldState);
-        return result;
-    }
-}
-
 void waitInNativeState(pthread_cond_t* cond, pthread_mutex_t* mutex) {
     kotlin::compactObjectPoolInCurrentThread();
-    CallWithThreadStateNativeNoSafePointExit(pthread_cond_wait, cond, mutex);
+#if defined(__aarch64__)
+    if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) {
+        mm::KotlinFrameAnchor anchor = mm::captureCallerFrameAnchor();
+        mm::ThreadRegistry::Instance().CurrentThreadData()->pushStackMapAnchor(anchor);
+    }
+#endif
+
+    CallWithThreadState<ThreadState::kNative>(pthread_cond_wait, cond, mutex);
+#if defined(__aarch64__)
+    if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) {
+        mm::ThreadRegistry::Instance().CurrentThreadData()->popStackMapAnchor();
+    }
+#endif
 }
 
 void waitInNativeState(pthread_cond_t* cond,
@@ -235,7 +226,7 @@ void waitInNativeState(pthread_cond_t* cond,
           uint64_t timeoutNanoseconds,
           uint64_t* microsecondsPassed = nullptr) {
     kotlin::compactObjectPoolInCurrentThread();
-    CallWithThreadStateNativeNoSafePointExit(WaitOnCondVar, cond, mutex, timeoutNanoseconds, microsecondsPassed);
+    CallWithThreadState<ThreadState::kNative>(WaitOnCondVar, cond, mutex, timeoutNanoseconds, microsecondsPassed);
 }
 
 KULong pthreadToNumber(pthread_t thread) {
@@ -1017,36 +1008,12 @@ void Kotlin_Worker_executeAfterInternal(KInt id, mm::RawExternalRCRef* job, KLon
   executeAfter(id, mm::OwningExternalRCRef(job), afterMicroseconds);
 }
 
-NO_INLINE KBoolean Kotlin_Worker_processQueueInternal(KInt id) {
-#if defined(__aarch64__)
-  if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) {
-      mm::KotlinFrameAnchor anchor = mm::captureCallerFrameAnchor();
-      mm::ThreadRegistry::Instance().CurrentThreadData()->pushStackMapAnchor(anchor);
-  }
-#endif
-  KBoolean result = processQueue(id);
-#if defined(__aarch64__)
-  if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) {
-      mm::ThreadRegistry::Instance().CurrentThreadData()->popStackMapAnchor();
-  }
-#endif
-  return result;
+KBoolean Kotlin_Worker_processQueueInternal(KInt id) {
+  return processQueue(id);
 }
 
-NO_INLINE KBoolean Kotlin_Worker_parkInternal(KInt id, KLong timeoutMicroseconds, KBoolean process) {
-#if defined(__aarch64__)
-  if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) {
-      mm::KotlinFrameAnchor anchor = mm::captureCallerFrameAnchor();
-      mm::ThreadRegistry::Instance().CurrentThreadData()->pushStackMapAnchor(anchor);
-  }
-#endif
-  KBoolean result = park(id, timeoutMicroseconds, process);
-#if defined(__aarch64__)
-  if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) {
-      mm::ThreadRegistry::Instance().CurrentThreadData()->popStackMapAnchor();
-  }
-#endif
-  return result;
+KBoolean Kotlin_Worker_parkInternal(KInt id, KLong timeoutMicroseconds, KBoolean process) {
+  return park(id, timeoutMicroseconds, process);
 }
 
 mm::RawExternalRCRef* Kotlin_Worker_getNameInternal(KInt id) {
@@ -1057,36 +1024,12 @@ KInt Kotlin_Worker_stateOfFuture(KInt id) {
   return stateOfFuture(id);
 }
 
-NO_INLINE mm::RawExternalRCRef* Kotlin_Worker_consumeFuture(KInt id) {
-#if defined(__aarch64__)
-  if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) {
-      mm::KotlinFrameAnchor anchor = mm::captureCallerFrameAnchor();
-      mm::ThreadRegistry::Instance().CurrentThreadData()->pushStackMapAnchor(anchor);
-  }
-#endif
-  mm::RawExternalRCRef* result = consumeFuture(id).detach();
-#if defined(__aarch64__)
-  if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) {
-      mm::ThreadRegistry::Instance().CurrentThreadData()->popStackMapAnchor();
-  }
-#endif
-  return result;
+mm::RawExternalRCRef* Kotlin_Worker_consumeFuture(KInt id) {
+    return consumeFuture(id).detach();
 }
 
-NO_INLINE KBoolean Kotlin_Worker_waitForAnyFuture(KInt versionToken, KInt millis) {
-#if defined(__aarch64__)
-  if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) {
-      mm::KotlinFrameAnchor anchor = mm::captureCallerFrameAnchor();
-      mm::ThreadRegistry::Instance().CurrentThreadData()->pushStackMapAnchor(anchor);
-  }
-#endif
-  KBoolean result = waitForAnyFuture(versionToken, millis);
-#if defined(__aarch64__)
-  if (kotlin::compiler::gcStackMapScheme() == kotlin::compiler::GCStackMapScheme::kDeltaMain) {
-      mm::ThreadRegistry::Instance().CurrentThreadData()->popStackMapAnchor();
-  }
-#endif
-  return result;
+KBoolean Kotlin_Worker_waitForAnyFuture(KInt versionToken, KInt millis) {
+  return waitForAnyFuture(versionToken, millis);
 }
 
 KInt Kotlin_Worker_versionToken() {

@@ -74,7 +74,7 @@ public:
 
     ThreadState state() noexcept { return suspensionData_.state(); }
 
-    ALWAYS_INLINE ThreadState setState(ThreadState state) noexcept { return suspensionData_.setState(state); }
+    ThreadState setState(ThreadState state) noexcept { return suspensionData_.setState(state); }
 
     ShadowStack& shadowStack() noexcept { return shadowStack_; }
 

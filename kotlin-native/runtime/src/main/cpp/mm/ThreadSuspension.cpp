@@ -26,7 +26,7 @@ namespace {
 
 std::atomic<mm::internal::SuspensionReason> mm::internal::gSuspensionRequestReason = nullptr;
 
-ALWAYS_INLINE mm::ThreadSuspensionData::MutatorPauseHandle::MutatorPauseHandle(const char* reason, mm::ThreadData& threadData) noexcept
+PERFORMANCE_INLINE mm::ThreadSuspensionData::MutatorPauseHandle::MutatorPauseHandle(const char* reason, mm::ThreadData& threadData) noexcept
     :
     reason_(reason), threadData_(threadData), pauseStartTimeMicros_(konan::getTimeMicros()) {
     auto prevState = threadData_.suspensionData().setStateNoSafePoint(ThreadState::kNative);
@@ -39,7 +39,7 @@ PERFORMANCE_INLINE mm::ThreadSuspensionData::MutatorPauseHandle::~MutatorPauseHa
     if (!resumed) resume();
 }
 
-ALWAYS_INLINE void mm::ThreadSuspensionData::MutatorPauseHandle::resume() noexcept {
+PERFORMANCE_INLINE void mm::ThreadSuspensionData::MutatorPauseHandle::resume() noexcept {
     RuntimeAssert(!resumed, "Must not be resumed yet");
     auto prevState = threadData_.suspensionData().setStateNoSafePoint(ThreadState::kRunnable);
     RuntimeAssert(prevState == ThreadState::kNative, "Expected native state");
@@ -54,7 +54,7 @@ ALWAYS_INLINE void mm::ThreadSuspensionData::MutatorPauseHandle::resume() noexce
 
 }
 
-ALWAYS_INLINE kotlin::ThreadState kotlin::mm::ThreadSuspensionData::setState(kotlin::ThreadState newState) noexcept {
+kotlin::ThreadState kotlin::mm::ThreadSuspensionData::setState(kotlin::ThreadState newState) noexcept {
     ThreadState oldState = state_.exchange(newState);
     if (oldState == ThreadState::kNative && newState == ThreadState::kRunnable) {
         // Must use already acquired `ThreadData` because TLS may be in invalid state e.g. during thread detach.
@@ -91,7 +91,7 @@ void mm::ThreadSuspensionData::requestThreadsSuspension(const char* reason) noex
     }
 }
 
-ALWAYS_INLINE mm::ThreadSuspensionData::MutatorPauseHandle mm::ThreadSuspensionData::pauseMutationInScope(
+PERFORMANCE_INLINE mm::ThreadSuspensionData::MutatorPauseHandle mm::ThreadSuspensionData::pauseMutationInScope(
         const char* reason) noexcept {
 #if defined(__aarch64__)
     if (compiler::gcStackMapScheme() == compiler::GCStackMapScheme::kDeltaMain) {

@@ -131,7 +131,7 @@ public:
      * Weak reference reads may be mutually exclusive with certain parts of mark oprocess.
      * Every read must be guarded by the object returned by this method.
      */
-    ALWAYS_INLINE auto weakReadProtector() noexcept {
+    auto weakReadProtector() noexcept {
         auto markTerminationGuard = std::shared_lock{markTerminationMutex_, std::defer_lock};
         while (!markTerminationGuard.try_lock()) {
             mm::safePoint();
