@@ -478,7 +478,7 @@ internal class CodegenLlvmHelpers(private val generationState: NativeGenerationS
         if (context.config.gcStackMapScheme == GCStackMapScheme.DELTA_MAIN) {
             importRtFunction("Kotlin_mm_switchThreadStateRunnable_delta_main", false);
         } else {
-            Kotlin_mm_switchThreadStateNative_n2k
+            Kotlin_mm_switchThreadStateRunnable_n2k
         }
     }
 
