@@ -6,7 +6,6 @@
 package org.jetbrains.kotlin.backend.konan
 
 import org.jetbrains.kotlin.config.LanguageFeature
-import org.jetbrains.kotlin.config.nativeBinaryOptions.GCStackMapScheme
 import org.jetbrains.kotlin.konan.config.konanPrintBitcode
 import org.jetbrains.kotlin.konan.config.konanPrintFiles
 import org.jetbrains.kotlin.konan.config.verifyBitcode
@@ -36,7 +35,7 @@ interface ConfigChecks {
 
     fun shouldOptimize() = config.optimizationsEnabled
 
-    fun shouldInlineSafepoints() = config.inlineForPerformance || config.gcStackMapScheme == GCStackMapScheme.DELTA_MAIN
+    fun shouldInlineSafepoints() = config.inlineForPerformance
 
     fun useLazyFileInitializers() = config.propertyLazyInitialization
 
