@@ -40,9 +40,26 @@ struct KotlinFrameAnchor {
     }
 };
 
-// Captures the immediate caller's {fp, pc} by reading this function's own
-// frame record (ALWAYS_INLINE so __builtin_frame_address(0) resolves to
-// the caller's frame once inlined, not a separate frame of its own).
+// Reads {fp, pc} from this function's own stack frame. This works only
+// because the function is ALWAYS_INLINE: after inlining, its frame is
+// gone, so __builtin_frame_address(0) gives the caller's frame.
+//
+// This function must always be called from one of two places, or the
+// result is the wrong frame:
+//
+//   1. Inside a NO_INLINE function that Kotlin code calls directly, such
+//      as Kotlin_mm_switchThreadStateNative_delta_main. That function
+//      must be kept NO_INLINE. If it were inlined, the result would be
+//      one frame too high: the caller of the caller, not the caller.
+//
+//   2. Inside slowPathImpl (SafePoint.cpp), the only NO_INLINE function
+//      in the safepoint slow path. Every function between the Kotlin
+//      call and slowPathImpl must be ALWAYS_INLINE, such as
+//      mm::safePoint. PERFORMANCE_INLINE is not enough.
+//
+// A new function added to either chain must follow the same rule: keep
+// it NO_INLINE if it reads its own frame this way; make it ALWAYS_INLINE
+// if it only calls shared code.
 ALWAYS_INLINE inline KotlinFrameAnchor captureCallerFrameAnchor() {
     uint64_t* fp = reinterpret_cast<uint64_t*>(__builtin_frame_address(0));
     return KotlinFrameAnchor{(uint64_t*) fp[0], (uint64_t*) fp[1]};
