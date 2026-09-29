@@ -522,8 +522,20 @@ internal class CodegenLlvmHelpers(private val generationState: NativeGenerationS
     private val Kotlin_ObjCExport_NSIntegerTypeProvider by lazy { importRtFunction("Kotlin_ObjCExport_NSIntegerTypeProvider", false) }
     private val Kotlin_longTypeProvider by lazy { importRtFunction("Kotlin_longTypeProvider", false) }
 
-    val Kotlin_mm_safePointFunctionPrologue by lazy { importRtFunction("Kotlin_mm_safePointFunctionPrologue", false) }
-    val Kotlin_mm_safePointWhileLoopBody by lazy { importRtFunction("Kotlin_mm_safePointWhileLoopBody", false) }
+    val Kotlin_mm_safePointFunctionPrologue by lazy {
+        if (context.config.gcStackMapScheme == GCStackMapScheme.DELTA_MAIN) {
+            importRtFunction("Kotlin_mm_safePointFunctionPrologue_delta_main", false)
+        } else {
+            importRtFunction("Kotlin_mm_safePointFunctionPrologue", false)
+        }
+    }
+    val Kotlin_mm_safePointWhileLoopBody by lazy {
+        if (context.config.gcStackMapScheme == GCStackMapScheme.DELTA_MAIN) {
+            importRtFunction("Kotlin_mm_safePointWhileLoopBody_delta_main", false)
+        } else {
+            importRtFunction("Kotlin_mm_safePointWhileLoopBody", false)
+        }
+    }
 
     val Kotlin_processObjectInMark by lazy { importRtFunction("Kotlin_processObjectInMark", false, objectParams = listOf(1)) }
     val Kotlin_processArrayInMark by lazy { importRtFunction("Kotlin_processArrayInMark", false, objectParams = listOf(1)) }

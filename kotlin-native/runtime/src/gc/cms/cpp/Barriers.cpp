@@ -201,7 +201,7 @@ NO_INLINE ObjHeader* weakRefReadInWeakSweepSlowPath(ObjHeader* weakReferee) noex
 
 } // namespace
 
-PERFORMANCE_INLINE ObjHeader* gc::barriers::weakRefReadBarrier(std_support::atomic_ref<ObjHeader*> weakReferee) noexcept {
+ALWAYS_INLINE ObjHeader* gc::barriers::weakRefReadBarrier(std_support::atomic_ref<ObjHeader*> weakReferee) noexcept {
     if (__builtin_expect(currentPhase() != BarriersPhase::kDisabled, false)) {
         // Mark dispatcher requires weak reads be protected by the following:
         auto weakReadProtector = markDispatcher().weakReadProtector();
