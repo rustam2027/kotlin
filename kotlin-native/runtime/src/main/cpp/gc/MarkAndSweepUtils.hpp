@@ -143,8 +143,14 @@ void collectRootSetFromMapForThread(GCHandle gcHandle, typename Traits::MarkQueu
     for (auto anchor : thread.frameAnchors()) {
         RuntimeLogDebug({logging::Tag::kGC}, "Start new anchor pc=%p fp=%p", anchor.pc, anchor.fp);
 
+        while (anchor.fp != 0 && !stackMapBuilder.hasMapForPC(anchor.pc)) {
+            anchor = anchor.next;
+            RuntimeLogDebug({logging::Tag::kGC}, "Hop one frame up pc=%p fp=%p", anchor.pc, anchor.fp);
+        }
+
         if (!stackMapBuilder.hasMapForPC(anchor.pc) || anchor.fp == 0 || anchor.pc == 0) {
-            RuntimeFail("Could not find live kotlin frame");
+            RuntimeLogDebug({logging::Tag::kGC}, "Cannot find live frame");
+            continue;
         }
 
         while (anchor.fp != 0 && stackMapBuilder.hasMapForPC(anchor.pc)) {
