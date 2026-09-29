@@ -400,19 +400,9 @@ extern "C" RUNTIME_NOTHROW NO_INLINE void Kotlin_mm_safePointFunctionPrologue() 
     mm::safePoint();
 }
 
-extern "C" RUNTIME_NOTHROW PERFORMANCE_INLINE void Kotlin_mm_safePointWhileLoopBody() {
+extern "C" RUNTIME_NOTHROW ALWAYS_INLINE void Kotlin_mm_safePointWhileLoopBody() {
     mm::safePoint();
 }
-
-#if defined(__aarch64__)
-extern "C" RUNTIME_NOTHROW ALWAYS_INLINE void Kotlin_mm_safePointFunctionPrologue_delta_main() {
-    mm::safePoint();
-}
-
-extern "C" RUNTIME_NOTHROW ALWAYS_INLINE void Kotlin_mm_safePointWhileLoopBody_delta_main() {
-    mm::safePoint();
-}
-#endif
 
 extern "C" PERFORMANCE_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateNative() {
     SwitchThreadState(mm::ThreadRegistry::Instance().CurrentThreadData(), ThreadState::kNative);
@@ -423,7 +413,7 @@ extern "C" NO_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateNative_debu
 }
 
 #if defined(__aarch64__)
-extern "C" ALWAYS_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateNative_delta_main() {
+extern "C" NO_INLINE RUNTIME_NOTHROW void Kotlin_mm_switchThreadStateNative_delta_main() {
     mm::KotlinFrameAnchor anchor = mm::captureCallerFrameAnchor();
     mm::ThreadRegistry::Instance().CurrentThreadData()->pushStackMapAnchor(anchor);
     SwitchThreadState(mm::ThreadRegistry::Instance().CurrentThreadData(), ThreadState::kNative);
