@@ -484,11 +484,17 @@ void kotlin::compactObjectPoolInCurrentThread() noexcept {
 
 #if defined(__aarch64__)
 bool ThreadStateGuard::pushThreadAnchor(MemoryState* thread_) {
-    thread_->GetThreadData()->pushStackMapAnchor(mm::captureCallerFrameAnchor());
+    mm::ThreadData* threadData = thread_->GetThreadData();
+    RuntimeAssert(threadData == mm::ThreadRegistry::Instance().CurrentThreadData(),
+                  "Anchor must be pushed on the current thread, but guard targets thread data %p", threadData);
+    threadData->pushStackMapAnchor(mm::captureCallerFrameAnchor());
     return true;
 }
 
 void ThreadStateGuard::popThreadAnchor(MemoryState* thread_) {
-    thread_->GetThreadData()->popStackMapAnchor();
+    mm::ThreadData* threadData = thread_->GetThreadData();
+    RuntimeAssert(threadData == mm::ThreadRegistry::Instance().CurrentThreadData(),
+                  "Anchor must be pushed on the current thread, but guard targets thread data %p", threadData);
+    threadData->popStackMapAnchor();
 }
 #endif

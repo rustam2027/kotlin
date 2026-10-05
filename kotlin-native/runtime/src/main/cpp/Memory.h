@@ -24,7 +24,6 @@
 #include "CompilerConstants.hpp"
 #include "KAssert.h"
 #include "Common.h"
-#include "ThreadData.hpp"
 #include "TypeInfo.h"
 #include "PointerBits.h"
 #include "Utils.hpp"
@@ -380,7 +379,7 @@ ALWAYS_INLINE inline void AssertThreadState(std::initializer_list<ThreadState> e
 class ThreadStateGuard final : private MoveOnly {
 public:
     // Do not set any state. Useful to create a variable to move another guard into.
-    ThreadStateGuard() : thread_(nullptr), oldState_(ThreadState::kNative), reentrant_(false) {}
+    ThreadStateGuard() : thread_(nullptr), oldState_(ThreadState::kNative), reentrant_(false), pushed_(false) {}
 
     // Set the state for the given thread.
     ThreadStateGuard(MemoryState* thread, ThreadState state, bool reentrant = false) noexcept : thread_(thread), reentrant_(reentrant), pushed_(false) {
@@ -399,7 +398,7 @@ public:
         : ThreadStateGuard(mm::GetMemoryState(), state, reentrant) {};
 
     ThreadStateGuard(ThreadStateGuard&& other) noexcept
-        : thread_(other.thread_), oldState_(other.oldState_), reentrant_(other.reentrant_) {
+        : thread_(other.thread_), oldState_(other.oldState_), reentrant_(other.reentrant_), pushed_(other.pushed_) {
         other.thread_ = nullptr;
     }
 
@@ -416,9 +415,9 @@ public:
     }
 
 #if defined(__aarch64__)
-    NO_INLINE bool pushThreadAnchor(MemoryState*);
+    NO_INLINE static bool pushThreadAnchor(MemoryState*);
 
-    NO_INLINE void popThreadAnchor(MemoryState*);
+    NO_INLINE static void popThreadAnchor(MemoryState*);
 #endif
 
     ThreadStateGuard& operator=(ThreadStateGuard&& other) noexcept {
