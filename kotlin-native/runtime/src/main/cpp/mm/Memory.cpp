@@ -228,18 +228,7 @@ extern "C" RUNTIME_NOTHROW ObjHeader** LookupTLS(void** key, int index) {
 }
 
 extern "C" void Kotlin_native_internal_GC_collect(ObjHeader*) {
-#if defined(__aarch64__)
-    if (compiler::gcStackMapScheme() == compiler::GCStackMapScheme::kDeltaMain) {
-        mm::KotlinFrameAnchor anchor = mm::captureCallerFrameAnchor();
-        mm::ThreadRegistry::Instance().CurrentThreadData()->pushStackMapAnchor(anchor);
-    }
-#endif
     mm::GlobalData::Instance().gcScheduler().scheduleAndWaitFinalized();
-#if defined(__aarch64__)
-    if (compiler::gcStackMapScheme() == compiler::GCStackMapScheme::kDeltaMain) {
-        mm::ThreadRegistry::Instance().CurrentThreadData()->popStackMapAnchor();
-    }
-#endif
 }
 
 extern "C" void Kotlin_native_internal_GC_schedule(ObjHeader*) {
@@ -492,3 +481,14 @@ void kotlin::initObjectPool() noexcept {
 void kotlin::compactObjectPoolInCurrentThread() noexcept {
     alloc::compactObjectPoolInCurrentThread();
 }
+
+#if defined(__aarch64__)
+bool ThreadStateGuard::pushThreadAnchor(MemoryState* thread_) {
+    thread_->GetThreadData()->pushStackMapAnchor(mm::captureCallerFrameAnchor());
+    return true;
+}
+
+void ThreadStateGuard::popThreadAnchor(MemoryState* thread_) {
+    thread_->GetThreadData()->popStackMapAnchor();
+}
+#endif

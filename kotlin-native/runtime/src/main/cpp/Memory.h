@@ -21,8 +21,10 @@
 #include <std_support/Atomic.hpp>
 
 #include "Alignment.hpp"
+#include "CompilerConstants.hpp"
 #include "KAssert.h"
 #include "Common.h"
+#include "ThreadData.hpp"
 #include "TypeInfo.h"
 #include "PointerBits.h"
 #include "Utils.hpp"
@@ -381,7 +383,14 @@ public:
     ThreadStateGuard() : thread_(nullptr), oldState_(ThreadState::kNative), reentrant_(false) {}
 
     // Set the state for the given thread.
-    ThreadStateGuard(MemoryState* thread, ThreadState state, bool reentrant = false) noexcept : thread_(thread), reentrant_(reentrant) {
+    ThreadStateGuard(MemoryState* thread, ThreadState state, bool reentrant = false) noexcept : thread_(thread), reentrant_(reentrant), pushed_(false) {
+#if defined(__aarch64__)
+        if (compiler::gcStackMapScheme() == compiler::GCStackMapScheme::kDeltaMain
+            && state == ThreadState::kNative
+            && GetThreadState(thread_) == ThreadState::kRunnable) {
+            pushed_ = pushThreadAnchor(thread_);
+        }
+#endif
         oldState_ = SwitchThreadState(thread_, state, reentrant_);
     }
 
@@ -397,13 +406,26 @@ public:
     ~ThreadStateGuard() noexcept {
         if (thread_ != nullptr) {
             SwitchThreadState(thread_, oldState_, reentrant_);
+#if defined(__aarch64__)
+            if (compiler::gcStackMapScheme() == compiler::GCStackMapScheme::kDeltaMain
+                && pushed_) {
+                popThreadAnchor(thread_);
+            }
+#endif
         }
     }
+
+#if defined(__aarch64__)
+    NO_INLINE bool pushThreadAnchor(MemoryState*);
+
+    NO_INLINE void popThreadAnchor(MemoryState*);
+#endif
 
     ThreadStateGuard& operator=(ThreadStateGuard&& other) noexcept {
         thread_ = other.thread_;
         oldState_ = other.oldState_;
         reentrant_ = other.reentrant_;
+        pushed_ = other.pushed_;
         other.thread_ = nullptr;
         return *this;
     }
@@ -412,6 +434,7 @@ private:
     MemoryState* thread_;
     ThreadState oldState_;
     bool reentrant_;
+    bool pushed_;
 };
 
 // Scopely sets the kRunnable thread state for the current thread,
