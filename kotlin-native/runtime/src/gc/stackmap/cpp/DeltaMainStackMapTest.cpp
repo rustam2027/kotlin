@@ -80,10 +80,10 @@ TEST(DeltaMainDeltaTest, XorIsSelfInverse) {
     // property DeltaMainStackMap::tryGetRootsInfo relies on
     // when a callsite's Delta equals its function's base Delta.
     Delta d;
-    d.slots = {0b0110};
+    d.indirectSlots = {0b0110};
 
     Delta selfXor = d ^ d;
-    EXPECT_TRUE(selfXor.slots.empty() || selfXor.slots[0] == 0);
+    EXPECT_TRUE(selfXor.indirectSlots.empty() || selfXor.indirectSlots[0] == 0);
 }
 
 TEST(DeltaMainDeltaTest, XorRecoversOriginalViaSecondXor) {
@@ -91,20 +91,20 @@ TEST(DeltaMainDeltaTest, XorRecoversOriginalViaSecondXor) {
     // this is exactly how a callsite's Delta is reconstructed from its
     // function's base Delta plus the stored per-callsite Delta.
     Delta base;
-    base.slots = {0b1100};
+    base.indirectSlots = {0b1100};
 
     Delta other;
-    other.slots = {0b1100};
+    other.indirectSlots = {0b1100};
 
     Delta diff = base ^ other;
     Delta recovered = base ^ diff;
 
-    EXPECT_EQ(recovered.slots, other.slots);
+    EXPECT_EQ(recovered.indirectSlots, other.indirectSlots);
 }
 
 TEST(DeltaMainDeltaTest, ToRootInfoDecodesStackSlotBits) {
     Delta d;
-    d.slots = {0b101}; // bits 0 and 2 set: two stack slots.
+    d.indirectSlots = {0b101}; // bits 0 and 2 set: two stack slots.
 
     RootsInfo info = d.toRootInfo(/*baseOffset=*/64);
 
@@ -122,10 +122,10 @@ TEST(DeltaMainDeltaTest, ToRootInfoDecodesStackSlotBits) {
 //   size             4 bytes, little endian, size of the function
 //   base             SLEB128, offset of slot 0 from the frame pointer
 //   frame size       ULEB128
-//   live set         ULEB128 bit vector, bit i is the slot at (base - 8 * i)
+//   live set         two ULEB128 bit vectors (indirect slots, direct slots), bit i is the slot at (base - 8 * i)
 //   call count       ULEB128
 //   calls            (return address - function address, delta index) as two ULEB128
-//   deltas           one ULEB128 bit vector each; the live set of a call is (live set ^ delta)
+//   deltas           two ULEB128 bit vectors each; the live set of a call is (live set ^ delta)
 
 namespace {
 
@@ -164,20 +164,37 @@ TEST(DeltaMainDecoderTest, DecodesTwoCallsWithShrinkingLiveSet) {
             {0x78},  // base: SLEB128 0x78 = -8
             {32},    // frame size
             {0b11},  // live set: slots 0 and 1
+            {0},     // direct live set: empty
             {2},     // two calls
             {12, 0}, // pc +12, delta 0
             {20, 1}, // pc +20, delta 1
             {0},     // delta 0: empty
+            {0},
             {0b01},  // delta 1: slot 0 is dead
+            {0},
     }));
 
     EXPECT_THAT(lookup(section, record, section.code(0x100 + 12)), testing::Optional(testing::ElementsAre(-8, -16)));
     EXPECT_THAT(lookup(section, record, section.code(0x100 + 20)), testing::Optional(testing::ElementsAre(-16)));
 }
 
+TEST(DeltaMainDecoderTest, DecodesDirectSlots) {
+    FakeStackMapSection section;
+    auto record = section.addRecord(0x100, 0x40, bytes({{0x78}, {32}, {0b1}, {0b10}, {1}, {8, 0}, {0}, {0}}));
+
+    FakeFrame frame(record);
+    RootsInfo info;
+    ASSERT_TRUE(section.map().tryGetRootsInfo(frame.fp(), section.code(0x100 + 8), info));
+    ASSERT_EQ(info.totalCount(), 2u);
+    EXPECT_EQ(info.bases()[0].Type, RootLocation::Indirect);
+    EXPECT_EQ(info.bases()[0].Offset, -8);
+    EXPECT_EQ(info.bases()[1].Type, RootLocation::Direct);
+    EXPECT_EQ(info.bases()[1].Offset, -16);
+}
+
 TEST(DeltaMainDecoderTest, CallWithoutRootsHasEmptyRoots) {
     FakeStackMapSection section;
-    auto record = section.addRecord(0x80, 0x40, bytes({{0}, {16}, {0}, {1}, {10, 0}, {0}}));
+    auto record = section.addRecord(0x80, 0x40, bytes({{0}, {16}, {0}, {0}, {1}, {10, 0}, {0}, {0}}));
 
     EXPECT_THAT(lookup(section, record, section.code(0x80 + 10)), testing::Optional(testing::IsEmpty()));
 }
@@ -185,7 +202,7 @@ TEST(DeltaMainDecoderTest, CallWithoutRootsHasEmptyRoots) {
 TEST(DeltaMainDecoderTest, LiveSetLongerThanOneByte) {
     // Eight slots: the bit vector is 7 bits per byte, 0xFF 0x01 = bits 0..7.
     FakeStackMapSection section;
-    auto record = section.addRecord(0x100, 0x40, bytes({{0x78}, {0x90, 0x01}, {0xFF, 0x01}, {1}, {8, 0}, {0}}));
+    auto record = section.addRecord(0x100, 0x40, bytes({{0x78}, {0x90, 0x01}, {0xFF, 0x01}, {0}, {1}, {8, 0}, {0}, {0}}));
 
     EXPECT_THAT(lookup(section, record, section.code(0x100 + 8)),
             testing::Optional(testing::ElementsAre(-8, -16, -24, -32, -40, -48, -56, -64)));
@@ -198,7 +215,7 @@ TEST(DeltaMainDecoderTest, MoreThanSixtyFourSlots) {
     liveSet[0] = 0x81;  // slot 0, continues
     liveSet[10] = 0x01; // slot 70, last byte (no continuation flag)
     FakeStackMapSection section;
-    auto record = section.addRecord(0x100, 0x40, bytes({{0x78}, {0xC0, 0x04}, liveSet, {1}, {8, 0}, {0}}));
+    auto record = section.addRecord(0x100, 0x40, bytes({{0x78}, {0xC0, 0x04}, liveSet, {0}, {1}, {8, 0}, {0}, {0}}));
 
     EXPECT_THAT(lookup(section, record, section.code(0x100 + 8)),
             testing::Optional(testing::ElementsAre(-8, -8 - 8 * 70)));
@@ -207,15 +224,15 @@ TEST(DeltaMainDecoderTest, MoreThanSixtyFourSlots) {
 TEST(DeltaMainDecoderTest, BaseOffsetOfSeveralBytes) {
     // -200 as SLEB128 is 0xB8 0x7E.
     FakeStackMapSection section;
-    auto record = section.addRecord(0x100, 0x40, bytes({{0xB8, 0x7E}, {0xF0, 0x01}, {0b101}, {1}, {8, 0}, {0}}));
+    auto record = section.addRecord(0x100, 0x40, bytes({{0xB8, 0x7E}, {0xF0, 0x01}, {0b101}, {0}, {1}, {8, 0}, {0}, {0}}));
 
     EXPECT_THAT(lookup(section, record, section.code(0x100 + 8)), testing::Optional(testing::ElementsAre(-200, -216)));
 }
 
 TEST(DeltaMainDecoderTest, SeveralFunctions) {
     FakeStackMapSection section;
-    auto first = section.addRecord(0x100, 0x40, bytes({{0x78}, {32}, {0b1}, {1}, {8, 0}, {0}}));
-    auto second = section.addRecord(0x200, 0x40, bytes({{0x70}, {48}, {0b11}, {2}, {4, 0}, {12, 1}, {0}, {0b10}}));
+    auto first = section.addRecord(0x100, 0x40, bytes({{0x78}, {32}, {0b1}, {0}, {1}, {8, 0}, {0}, {0}}));
+    auto second = section.addRecord(0x200, 0x40, bytes({{0x70}, {48}, {0b11}, {0}, {2}, {4, 0}, {12, 1}, {0}, {0}, {0b10}, {0}}));
 
     EXPECT_THAT(lookup(section, first, section.code(0x100 + 8)), testing::Optional(testing::ElementsAre(-8)));
     EXPECT_THAT(lookup(section, second, section.code(0x200 + 4)), testing::Optional(testing::ElementsAre(-16, -24)));
@@ -227,7 +244,7 @@ TEST(DeltaMainDecoderTest, SeveralFunctions) {
 class DeltaMainFrameValidationTest : public testing::Test {
 protected:
     DeltaMainFrameValidationTest() {
-        record_ = section_.addRecord(0x100, 0x40, bytes({{0x78}, {32}, {0b1}, {1}, {8, 0}, {0}}));
+        record_ = section_.addRecord(0x100, 0x40, bytes({{0x78}, {32}, {0b1}, {0}, {1}, {8, 0}, {0}, {0}}));
     }
 
     FakeStackMapSection section_;
@@ -306,7 +323,7 @@ TEST(DeltaMainCollectTest, FindsEveryCallOfEveryFunction) {
 
 TEST(DeltaMainCollectTest, UnknownPcHasNoMap) {
     FakeStackMapSection section;
-    section.addRecord(0x100, 0x40, bytes({{0x78}, {32}, {0b1}, {1}, {8, 0}, {0}}));
+    section.addRecord(0x100, 0x40, bytes({{0x78}, {32}, {0b1}, {0}, {1}, {8, 0}, {0}, {0}}));
     auto map = section.map(false);
     map.collect();
 
@@ -324,7 +341,7 @@ TEST(DeltaMainCollectTest, EmptySectionHasNoMaps) {
 
 TEST(DeltaMainCollectTest, BytesAfterTheLastRecordAreFatal) {
     FakeStackMapSection section;
-    section.addRecord(0x100, 0x40, bytes({{0x78}, {32}, {0b1}, {1}, {8, 0}, {0}}));
+    section.addRecord(0x100, 0x40, bytes({{0x78}, {32}, {0b1}, {0}, {1}, {8, 0}, {0}, {0}}));
     section.addBytes({0x7f, 0x7f, 0x7f});
     auto map = section.map(false);
 

@@ -142,22 +142,23 @@ void collectRootSetFromMapForThread(GCHandle gcHandle, typename Traits::MarkQueu
 
     auto collectRoots = [&](mm::KotlinFrameAnchor anchor, const stackMap::RootsInfo& frameRoots) {
         for (const auto& rootsInfo : frameRoots.bases()) {
+            uint8_t* address = (uint8_t*) anchor.fp + rootsInfo.Offset;
+            ObjHeader* object = nullptr;
             if (rootsInfo.Type == stackMap::RootLocation::Indirect) {
-                uint8_t* address = (uint8_t*) anchor.fp + rootsInfo.Offset;
-                ObjHeader* object = *reinterpret_cast<ObjHeader**>(address);
-
-                RuntimeLogDebug({logging::Tag::kGC}, "Trying to collect root slot pc=%p fp=%p address=%p", anchor.pc, anchor.fp, address);
-                RuntimeLogDebug({logging::Tag::kGC}, "Object address=%p", object);
-
-                if (internal::collectRoot<Traits>(markQueue, object)) {
-                    handle.addStackRoot();
-                    RuntimeLogDebug({logging::Tag::kGC}, "collected root slot pc=%p fp=%p address=%p", anchor.pc, anchor.fp, address);
-                } else {
-                    RuntimeLogDebug({logging::Tag::kGC}, "root slot is not collected pc=%p fp=%p address=%p", anchor.pc, anchor.fp, address);
-                }
-
+                object = *reinterpret_cast<ObjHeader**>(address);
+            } else if (rootsInfo.Type == stackMap::RootLocation::Direct) {
+                object = reinterpret_cast<ObjHeader*>(address);
             } else {
-                RuntimeFail("Indirect only expected");
+                RuntimeFail("Wrong rootsInfo type");
+            }
+            RuntimeLogDebug({logging::Tag::kGC}, "Trying to collect root slot pc=%p fp=%p address=%p", anchor.pc, anchor.fp, address);
+            RuntimeLogDebug({logging::Tag::kGC}, "Object address=%p", object);
+
+            if (internal::collectRoot<Traits>(markQueue, object)) {
+                handle.addStackRoot();
+                RuntimeLogDebug({logging::Tag::kGC}, "collected root slot pc=%p fp=%p address=%p", anchor.pc, anchor.fp, address);
+            } else {
+                RuntimeLogDebug({logging::Tag::kGC}, "root slot is not collected pc=%p fp=%p address=%p", anchor.pc, anchor.fp, address);
             }
         }
     };

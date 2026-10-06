@@ -38,7 +38,8 @@ std::pair<uint8_t*, uint8_t*> findSection() noexcept {
 
 Delta readDelta(ByteReader& reader) {
     Delta delta;
-    delta.slots = reader.nextULEB128BitVector();
+    delta.indirectSlots = reader.nextULEB128BitVector();
+    delta.directSlots = reader.nextULEB128BitVector();
     return delta;
 }
 

@@ -14,7 +14,8 @@ namespace kotlin::stackMap {
 /// llvm/include/llvm/CodeGen/DeltaMainStackMap.h in the LLVM-side port) --
 /// the two must agree on encoding, since one is produced by the other.
 struct Delta {
-    std::vector<uint64_t> slots;
+    std::vector<uint64_t> indirectSlots;
+    std::vector<uint64_t> directSlots;
 
     /// Converts this Delta's live-location set to root locations relative
     /// to `baseOffset` (the function's highest live stack offset -- see
