@@ -7,6 +7,8 @@
 #define RUNTIME_GC_COMMON_MARK_AND_SWEEP_UTILS_H
 
 #include <cstdint>
+#include <unordered_set>
+#include <vector>
 #include "KAssert.h"
 #if defined(__aarch64__)
 #include "DeltaMainStackMap.hpp"
@@ -60,14 +62,39 @@ void processArrayInMark(void* state, ArrayHeader* array) noexcept {
     });
 }
 
+// A stack object has no mark data and may change or disappear once the mutator resumes,
+// so it can not go through the mark queue. Scan it, and all stack objects reachable from it,
+// during root collection. Heap objects that they refer to are enqueued.
+template <typename Traits>
+void processStackObjectInMark(typename Traits::MarkQueue& markQueue, ObjHeader* root) noexcept {
+    std::unordered_set<ObjHeader*> visited;
+    std::vector<ObjHeader*> pending;
+    ObjHeader* object = root;
+    while (true) {
+        RuntimeAssert(!object->has_meta_object(), "stack object %p may not have an extra object data", object);
+        traverseReferredObjects(object, [&](ObjHeader* field) noexcept {
+            if (field->heap()) {
+                Traits::tryEnqueue(markQueue, field);
+            } else if (field->stack() && visited.insert(field).second) {
+                pending.push_back(field);
+            }
+        });
+        if (pending.empty()) break;
+        object = pending.back();
+        pending.pop_back();
+    }
+}
+
 template <typename Traits>
 bool collectRoot(typename Traits::MarkQueue& markQueue, ObjHeader* object) noexcept {
     if (isNullOrMarker(object)) return false;
 
     if (object->heap()) {
         Traits::tryEnqueue(markQueue, object);
+    } else if (object->stack()) {
+        processStackObjectInMark<Traits>(markQueue, object);
     } else {
-        // Each permanent and stack object has own entry in the root set, so it's okay to only process objects in heap.
+        // Each permanent has own entry in the root set.
         Traits::processInMark(markQueue, object);
         RuntimeAssert(!object->has_meta_object(), "Non-heap object %p may not have an extra object data", object);
     }
