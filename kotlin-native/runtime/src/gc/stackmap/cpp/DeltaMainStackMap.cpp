@@ -12,7 +12,8 @@ namespace kotlin::stackMap {
 
 Delta DeltaMainStackMapBuilder::Reader::getNextDelta() {
     Delta delta;
-    delta.slots = bytes_.nextULEB128BitVector();
+    delta.indirectSlots = bytes_.nextULEB128BitVector();
+    delta.directSlots = bytes_.nextULEB128BitVector();
     return delta;
 }
 

@@ -585,7 +585,7 @@ private fun PhaseEngine<NativeGenerationState>.runCodegen(module: IrModuleFragme
     val lifetimes = runAndMeasurePhase(
             EscapeAnalysisPhase,
             EscapeAnalysisInput(module, moduleDFG),
-            !runGlobalOptimizations || context.config.gcStackMapScheme == GCStackMapScheme.DELTA_MAIN)
+            !runGlobalOptimizations)
     runAndMeasurePhase(CodegenPhase, CodegenInput(module, irBuiltIns, lifetimes))
 }
 

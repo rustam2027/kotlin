@@ -5,7 +5,7 @@
 // This scheme's version byte, written by DeltaMainStackMapEncoder::emit and
 // checked by DeltaMainStackMapBuilder::verifyMagic. Bump this whenever the
 // wire format changes in a way that isn't purely additive.
-#define DELTA_MAIN_VERSION 4
+#define DELTA_MAIN_VERSION 5
 
 // Whether a function's stack map can be resolved lazily, from its stack
 // map's address alone, without first walking the whole `__LLVM_StackMaps`

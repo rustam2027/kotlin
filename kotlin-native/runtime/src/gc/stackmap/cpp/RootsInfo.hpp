@@ -13,8 +13,8 @@
 
 namespace kotlin::stackMap {
 
-/// A single GC root location: a stack slot (or, for the vestigial Direct
-/// case, a register), as decoded from a delta-main stack map (see
+/// A single GC root location: a stack slot or Direct (or
+/// a register), as decoded from a delta-main stack map (see
 /// DeltaMainStackMapEncoder::enumerate in the LLVM-side port for the
 /// register numbering this decodes).
 struct RootLocation {
@@ -30,6 +30,10 @@ struct RootLocation {
 
     static RootLocation ConstructIndirect(int32_t offset) {
         return RootLocation(RootLocationType::Indirect, -1, offset);
+    }
+
+    static RootLocation ConstructDirect(int32_t offset) {
+        return RootLocation(RootLocationType::Direct, -1, offset);
     }
 
     bool operator==(const RootLocation& other) const {
