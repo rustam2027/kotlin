@@ -16,7 +16,9 @@ RootLocation locationFromBitIndex(RootLocation::RootLocationType type, int32_t i
         case RootLocation::Indirect:
             return RootLocation::ConstructIndirect(static_cast<int32_t>(baseOffset - idx * 8));
         case RootLocation::Direct:
-            RuntimeFail("locationFromBitIndex: Direct locations are not stored in bit vectors");
+            return RootLocation::ConstructDirect(static_cast<int32_t>(baseOffset - idx * 8));
+        default:
+            RuntimeFail("locationFromBitIndex: Location wrong location type");
     }
 }
 
@@ -40,7 +42,8 @@ std::vector<uint64_t> xorWords(const std::vector<uint64_t>& lhs, const std::vect
 
 Delta operator^(const Delta& lhs, const Delta& rhs) {
     Delta result;
-    result.slots = xorWords(lhs.slots, rhs.slots);
+    result.indirectSlots = xorWords(lhs.indirectSlots, rhs.indirectSlots);
+    result.directSlots = xorWords(lhs.directSlots, rhs.directSlots);
     return result;
 }
 
@@ -55,8 +58,10 @@ void Delta::log(std::vector<uint64_t>& vec) const {
 }
 
 void Delta::logSlots() const {
-    RuntimeLogDebug({kTagGC}, "    Delta.slots");
-    log(const_cast<std::vector<uint64_t>&>(slots));
+    RuntimeLogDebug({kTagGC}, "    Delta.indirectSlots");
+    log(const_cast<std::vector<uint64_t>&>(indirectSlots));
+    RuntimeLogDebug({kTagGC}, "    Delta.directSlots");
+    log(const_cast<std::vector<uint64_t>&>(directSlots));
 }
 
 RootsInfo Delta::toRootInfo(uint64_t baseOffset) const {
@@ -77,7 +82,8 @@ RootsInfo Delta::toRootInfo(uint64_t baseOffset) const {
         }
     };
 
-    traverseBitVector(slots, RootLocation::RootLocationType::Indirect);
+    traverseBitVector(indirectSlots, RootLocation::RootLocationType::Indirect);
+    traverseBitVector(directSlots, RootLocation::RootLocationType::Direct);
 
     return result;
 }
