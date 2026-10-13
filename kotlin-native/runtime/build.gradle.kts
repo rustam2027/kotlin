@@ -157,6 +157,9 @@ bitcode {
                 "-std=c++17",
                 "-Werror",
                 "-O2",
+                // Delta-main walks the frame-pointer chain through runtime C++ frames,
+                // so every non-leaf runtime function must keep its frame record.
+                "-mframe-pointer=non-leaf".takeIf { target.supportsDeltaMainStackMaps() },
                 "-fno-aligned-allocation", // TODO: Remove when all targets support aligned allocation in C++ runtime.
                 "-Wall",
                 "-Wextra",
