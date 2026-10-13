@@ -382,7 +382,8 @@ public:
     ThreadStateGuard() : thread_(nullptr), oldState_(ThreadState::kNative), reentrant_(false), pushed_(false) {}
 
     // Set the state for the given thread.
-    ThreadStateGuard(MemoryState* thread, ThreadState state, bool reentrant = false) noexcept : thread_(thread), reentrant_(reentrant), pushed_(false) {
+    // Must be always inline to get correct thread anchor.
+    ALWAYS_INLINE ThreadStateGuard(MemoryState* thread, ThreadState state, bool reentrant = false) noexcept : thread_(thread), reentrant_(reentrant), pushed_(false) {
 #if defined(__aarch64__)
         if (compiler::gcStackMapScheme() == compiler::GCStackMapScheme::kDeltaMain
             && state == ThreadState::kNative
