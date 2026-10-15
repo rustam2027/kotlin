@@ -3,5 +3,6 @@ $TESTDATA_DIR$/simple.kt
 macos_arm64
 -produce
 framework
+-Xbinary=bundleId=org.jetbrains.kotlin.cli.test
 -o
 $TEMP_DIR$/gcStackMapSchemeFrameworkDefault

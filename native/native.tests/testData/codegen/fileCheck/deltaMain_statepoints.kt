@@ -7,6 +7,7 @@
 // DISABLE_NATIVE: gcType=NOOP
 // DISABLE_NATIVE: gcType=STWMS
 // DISABLE_NATIVE: gcType=PMCS
+// DISABLE_NATIVE: optimizationMode=DEBUG
 // FILECHECK_STAGE: LTOBitcodeOptimization
 // FREE_COMPILER_ARGS: -Xbinary=gcStackMapScheme=delta-main
 // FREE_COMPILER_ARGS: -opt-in=kotlin.experimental.ExperimentalNativeApi
