@@ -150,6 +150,11 @@ class NativeSecondStageCompilationConfig(
                         "delta-main GC stack maps are not supported with ${gc.name} collector. " +
                                 "Use the default shadow-stack scheme, or CMS collector.")
             }
+            if (!optimizationsEnabled) {
+                configuration.reportCompilationErrorAndThrow(
+                        "delta-main GC stack maps require optimizations. " +
+                                "Use the default shadow-stack scheme, or add the -opt compiler option.")
+            }
         }
     }
     val runtimeAssertsMode: RuntimeAssertsMode get() = configuration.get(BinaryOptions.runtimeAssertionsMode) ?: RuntimeAssertsMode.IGNORE
@@ -530,10 +535,6 @@ class NativeSecondStageCompilationConfig(
             append("-stack_protector${stackProtectorMode.name}")
         if (genericSafeCasts != defaultGenericSafeCasts)
             append("-generic_safe_casts${if (genericSafeCasts) "ENABLE" else "DISABLE"}")
-        // The scheme changes the code generated for every klib (address space of objects, frames, anchors),
-        // so both system and user caches must be separated by it.
-        if (gcStackMapScheme != defaultGCStackMapScheme)
-            append("-gc_stack_map_scheme${gcStackMapScheme.name}")
         // Ideally, we would like to use targetTriple instead, but this requires a lot of changes in our test infrastructure.
         if (macabi) {
             append("-macabi")
@@ -601,6 +602,7 @@ class NativeSecondStageCompilationConfig(
 
     internal val ignoreCacheReason = when {
         optimizationsEnabled && !enableReleaseBinaryCache -> "with global optimizations"
+        gcStackMapScheme == GCStackMapScheme.DELTA_MAIN -> "with delta-main GC stack maps"
         forceNativeThreadStateForFunctions != defaultForceNativeThreadStateForFunctions -> "with non-default forceNativeThreadStateForFunctions"
         else -> null
     }
