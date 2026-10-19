@@ -86,8 +86,11 @@ Record readRecord(uint8_t* record) {
 
 DeltaMainStackMap::DeltaMainStackMap() noexcept : lazy_(compiler::gcStackMapLazy()) {
     std::tie(begin_, end_) = findSection();
-    if (compiler::gcStackMapScheme() == compiler::GCStackMapScheme::kDeltaMain && !lazy_) {
-        collect();
+    if (compiler::gcStackMapScheme() == compiler::GCStackMapScheme::kDeltaMain) {
+        RuntimeCheck(begin_ != nullptr && end_ != nullptr, "Delta-main stack map section is not found");
+        if (!lazy_) {
+            collect();
+        }
     }
 }
 
