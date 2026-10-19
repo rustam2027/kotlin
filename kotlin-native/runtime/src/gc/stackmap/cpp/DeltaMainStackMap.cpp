@@ -6,6 +6,7 @@
 #include "VarIntCodec.hpp"
 
 #include <algorithm>
+#include <cinttypes>
 #include <set>
 #include <utility>
 #include <vector>
@@ -19,7 +20,7 @@ namespace kotlin::stackMap {
 
 namespace {
 
-constexpr size_t kRecordHeaderSize = 4;
+constexpr size_t kRecordHeaderSize = 8;
 
 std::pair<uint8_t*, uint8_t*> findSection() noexcept {
 #if defined(__APPLE__)
@@ -59,6 +60,7 @@ Record readRecord(uint8_t* record) {
     ByteReader reader(record);
     Record result;
     result.functionStart = reinterpret_cast<uintptr_t>(record) + static_cast<uintptr_t>(reader.nextInt(4));
+    reader.nextInt(4);
     result.baseOffset = reader.nextSLEB128();
     reader.nextULEB128();
     result.base = readDelta(reader);
@@ -116,14 +118,20 @@ bool DeltaMainStackMap::tryGetRootsInfo(const uint64_t* fp, uintptr_t pc, RootsI
     auto end = reinterpret_cast<uintptr_t>(end_);
     if (end - begin < kRecordHeaderSize || address < begin || address > end - kRecordHeaderSize) return false;
 
+    ByteReader header(reinterpret_cast<uint8_t*>(address));
+    uintptr_t functionStart = address + static_cast<uintptr_t>(header.nextInt(4));
+    auto functionSize = static_cast<uint32_t>(header.nextInt(4));
+    if (pc - functionStart >= functionSize) return false;
+
     Record record = readRecord(reinterpret_cast<uint8_t*>(address));
-    uint64_t targetPc = pc - record.functionStart;
+    uint64_t targetPc = pc - functionStart;
     auto it = std::lower_bound(
             record.pc2delta.begin(), record.pc2delta.end(), targetPc, [](const auto& pair, uint64_t val) { return pair.first < val; });
-    if (it == record.pc2delta.end() || it->first != targetPc) return false;
+    RuntimeCheck(it != record.pc2delta.end() && it->first == targetPc,
+            "No stack map for pc offset %" PRIu64 " in function at %p", targetPc, reinterpret_cast<void*>(functionStart));
 
     rootsInfo = record.rootsInfo(it->second);
-    rootsInfo.log(record.functionStart, pc);
+    rootsInfo.log(functionStart, pc);
     return true;
 }
 

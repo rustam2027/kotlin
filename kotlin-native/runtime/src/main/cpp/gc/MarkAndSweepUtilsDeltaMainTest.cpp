@@ -140,7 +140,7 @@ public:
     // The stack map says that the slots from `liveSet` hold GC roots; bit `i` is the slot at `baseOffset - 8 * i`.
     // By default, all four slots of the frame hold GC roots.
     void declareFrameMap(FakeFrame& frame, size_t frameIndex, uint8_t baseOffset = 0x68, uint8_t liveSet = 0b1111) {
-        frame.record = section_.addRecord(kFunctionSize * frameIndex,
+        frame.record = section_.addRecord(kFunctionSize * frameIndex, kFunctionSize,
                 stackMap::test::bytes({{baseOffset}, {32}, {liveSet}, {1}, {static_cast<uint8_t>(kCallOffset), 0}, {0}}));
     }
 

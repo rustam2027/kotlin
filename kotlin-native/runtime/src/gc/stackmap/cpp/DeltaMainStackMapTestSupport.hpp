@@ -26,13 +26,14 @@ public:
 
     static uintptr_t code(size_t offset) { return reinterpret_cast<uintptr_t>(code_) + offset; }
 
-    // `body` is everything in a record after the 32-bit distance to the function.
-    uintptr_t addRecord(size_t functionOffset, const std::vector<uint8_t>& body) {
+    // `body` is everything in a record after the two 32-bit numbers.
+    uintptr_t addRecord(size_t functionOffset, uint32_t functionSize, const std::vector<uint8_t>& body) {
         uint8_t* record = section_ + used_;
         auto distance = static_cast<int32_t>(code(functionOffset) - reinterpret_cast<uintptr_t>(record));
         std::memcpy(record, &distance, sizeof(distance));
-        std::memcpy(record + 4, body.data(), body.size());
-        used_ += 4 + body.size();
+        std::memcpy(record + 4, &functionSize, sizeof(functionSize));
+        std::memcpy(record + 8, body.data(), body.size());
+        used_ += 8 + body.size();
         return reinterpret_cast<uintptr_t>(record);
     }
 
