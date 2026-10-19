@@ -18,17 +18,12 @@
 #include "gtest/gtest.h"
 
 #include "DeltaMainStackMap.hpp"
+#include "DeltaMainStackMapTestSupport.hpp"
 #include "ObjectTestSupport.hpp"
 #include "TestSupport.hpp"
 #include "Utils.hpp"
 
 using namespace kotlin;
-
-// The constructor of DeltaMainStackMapBuilder takes the address of the section symbol. The linker
-// provides it only in a binary compiled with delta-main, so the test defines it. The bytes are never
-// read: the scheme of this test binary is shadow-stack, so the constructor does not check the magic.
-extern "C" uint8_t gTestStackMapsSection[1] __asm__("__LLVM_StackMaps");
-uint8_t gTestStackMapsSection[1];
 
 namespace {
 
@@ -94,30 +89,37 @@ private:
 // static
 RecordingMarkTraits* RecordingMarkTraits::instance_ = nullptr;
 
-// A stack frame as AArch64 lays it out for a function whose GC roots live in its locals: the locals are
-// below the frame record, the record ([saved fp, return address]) is at fp.
-// Root slot `i` is at `fp - 32 + 8 * i`, i.e. at the offsets -32, -24, -16, -8.
+// A stack frame as AArch64 lays it out for a function whose GC roots live in its locals: the address of
+// the stack map record is at fp - 16, the locals are below it, the frame record ([saved fp, return address])
+// is at fp. Root slot `i` is at `fp - 48 + 8 * i`, i.e. at the offsets -48, -40, -32, -24.
 struct alignas(16) FakeFrame {
     static constexpr size_t kSlots = 4;
 
     ObjHeader* slots[kSlots];
+    uint64_t record;
+    uint64_t padding;
     uint64_t savedFp;
     uint64_t returnPc;
 
     uint64_t* fp() { return &savedFp; }
 };
 static_assert(sizeof(FakeFrame) % 16 == 0);
-static_assert(offsetof(FakeFrame, savedFp) == FakeFrame::kSlots * sizeof(ObjHeader*));
+static_assert(offsetof(FakeFrame, savedFp) == (FakeFrame::kSlots + 2) * sizeof(ObjHeader*));
+static_assert(offsetof(FakeFrame, record) == offsetof(FakeFrame, savedFp) - 16);
+
+constexpr size_t kFunctionSize = 0x100;
+constexpr size_t kCallOffset = 0x10;
 
 // The fake pc "inside" frame number `i`: the return address a callee of that frame has stored.
 uint64_t* pcInFrame(size_t i) {
-    return reinterpret_cast<uint64_t*>(0x1000 + 0x10 * i);
+    return reinterpret_cast<uint64_t*>(stackMap::test::FakeStackMapSection::code(kFunctionSize * i + kCallOffset));
 }
 
 // Frames[0] is the youngest (lowest address), frames[n - 1] the oldest. Frame i was called from frame i + 1.
 void linkFrames(FakeFrame* frames, size_t count) {
     for (size_t i = 0; i < count; ++i) {
         for (auto& slot : frames[i].slots) slot = nullptr;
+        frames[i].record = 0;
         frames[i].savedFp = i + 1 < count ? reinterpret_cast<uint64_t>(frames[i + 1].fp()) : 0;
         frames[i].returnPc = reinterpret_cast<uint64_t>(pcInFrame(i + 1));
     }
@@ -135,14 +137,11 @@ public:
 
     mm::ThreadData& thread() { return *memoryInit_.memoryState()->GetThreadData(); }
 
-    // The stack map says that all four slots of the frame hold GC roots.
-    void declareFrameMap(size_t frameIndex) {
-        stackMap::RootsInfo info;
-        for (size_t i = 0; i < FakeFrame::kSlots; ++i) {
-            int32_t offset = -static_cast<int32_t>((FakeFrame::kSlots - i) * sizeof(ObjHeader*));
-            info.addBase(stackMap::RootLocation::ConstructIndirect(offset));
-        }
-        builder_.pc2RootsInfo()[reinterpret_cast<uintptr_t>(pcInFrame(frameIndex))] = std::move(info);
+    // The stack map says that the slots from `liveSet` hold GC roots; bit `i` is the slot at `baseOffset - 8 * i`.
+    // By default, all four slots of the frame hold GC roots.
+    void declareFrameMap(FakeFrame& frame, size_t frameIndex, uint8_t baseOffset = 0x68, uint8_t liveSet = 0b1111) {
+        frame.record = section_.addRecord(kFunctionSize * frameIndex,
+                stackMap::test::bytes({{baseOffset}, {32}, {liveSet}, {1}, {static_cast<uint8_t>(kCallOffset), 0}, {0}}));
     }
 
     void pushAnchor(FakeFrame& frame, size_t frameIndex) {
@@ -151,7 +150,8 @@ public:
 
     void walk() {
         auto handle = gc::GCHandle::create(epoch_++);
-        gc::collectRootSetFromMapForThread<RecordingMarkTraits>(handle, queue_, builder_, thread());
+        auto stackMap = section_.map();
+        gc::collectRootSetFromMapForThread<RecordingMarkTraits>(handle, queue_, stackMap, thread());
         handle.finished();
     }
 
@@ -161,8 +161,6 @@ public:
         gc::Mark<RecordingMarkTraits>(handle, queue_);
         handle.finished();
     }
-
-    std::unordered_map<uintptr_t, stackMap::RootsInfo>& builderMap() { return builder_.pc2RootsInfo(); }
 
     const std::vector<ObjHeader*>& enqueued() const { return traits_.enqueued(); }
     const std::unordered_set<ObjHeader*>& marked() const { return traits_.marked(); }
@@ -178,7 +176,7 @@ private:
     kotlin::ScopedMemoryInit memoryInit_;
     RecordingMarkTraits traits_;
     RecordingMarkTraits::MarkQueue queue_;
-    stackMap::DeltaMainStackMapBuilder builder_;
+    stackMap::test::FakeStackMapSection section_;
 };
 
 } // namespace
@@ -259,7 +257,7 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, CollectsTheSlotsListedInTheMapAndSkipsNul
     linkFrames(frames, 1);
     frames[0].slots[0] = a.header();
     frames[0].slots[3] = b.header();
-    declareFrameMap(0);
+    declareFrameMap(frames[0], 0);
     pushAnchor(frames[0], 0);
 
     walk();
@@ -274,10 +272,8 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, OnlySlotsFromTheMapAreRoots) {
     linkFrames(frames, 1);
     frames[0].slots[0] = a.header();
     frames[0].slots[1] = notARoot.header();
-    // The map lists only the first slot.
-    stackMap::RootsInfo info;
-    info.addBase(stackMap::RootLocation::ConstructIndirect(-32));
-    builderMap()[reinterpret_cast<uintptr_t>(pcInFrame(0))] = std::move(info);
+    // The map lists only the first slot, which is at -48.
+    declareFrameMap(frames[0], 0, 0x50, 0b1);
     pushAnchor(frames[0], 0);
 
     walk();
@@ -292,7 +288,7 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, WalksFromTheAnchorTowardsTheOldestFrame) 
     frames[0].slots[0] = a.header();
     frames[1].slots[0] = b.header();
     frames[2].slots[0] = c.header();
-    for (size_t i = 0; i < 3; ++i) declareFrameMap(i);
+    for (size_t i = 0; i < 3; ++i) declareFrameMap(frames[i], i);
     pushAnchor(frames[0], 0);
 
     walk();
@@ -307,8 +303,8 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, FramesBelowTheAnchorAreNotScanned) {
     linkFrames(frames, 2);
     frames[0].slots[0] = younger.header();
     frames[1].slots[0] = anchored.header();
-    declareFrameMap(0);
-    declareFrameMap(1);
+    declareFrameMap(frames[0], 0);
+    declareFrameMap(frames[1], 1);
     // The anchor is at frame 1: frame 0 is deeper than the anchor, it does not belong to this walk.
     pushAnchor(frames[1], 1);
 
@@ -326,8 +322,8 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, StepsOverFramesWithoutMap) {
     frames[0].slots[0] = upper.header();
     frames[1].slots[0] = ignored.header(); // a runtime frame: whatever is in its slots is not a root
     frames[2].slots[0] = lower.header();
-    declareFrameMap(0);
-    declareFrameMap(2);
+    declareFrameMap(frames[0], 0);
+    declareFrameMap(frames[2], 2);
     pushAnchor(frames[0], 0);
 
     walk();
@@ -343,7 +339,7 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, SeveralAnchorsScanEveryFrameOnce) {
     frames[1].slots[0] = b.header();
     frames[2].slots[0] = c.header();
     frames[3].slots[0] = d.header();
-    for (size_t i = 0; i < 4; ++i) declareFrameMap(i);
+    for (size_t i = 0; i < 4; ++i) declareFrameMap(frames[i], i);
     // Anchors are pushed oldest first, the last one is the youngest.
     pushAnchor(frames[2], 2);
     pushAnchor(frames[0], 0);
@@ -362,7 +358,7 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, AnchorsAtTheSameFrameScanItOnce) {
     FakeFrame frames[1];
     linkFrames(frames, 1);
     frames[0].slots[0] = a.header();
-    declareFrameMap(0);
+    declareFrameMap(frames[0], 0);
     pushAnchor(frames[0], 0);
     pushAnchor(frames[0], 0);
 
@@ -380,7 +376,25 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, AnchorFrameWithoutMapIsSkipped) {
     linkFrames(frames, 2);
     frames[0].slots[0] = ignored.header();
     frames[1].slots[0] = caller.header();
-    declareFrameMap(1);
+    declareFrameMap(frames[1], 1);
+    pushAnchor(frames[0], 0);
+
+    walk();
+
+    EXPECT_THAT(marked(), Objects({caller}));
+}
+
+// A word left in the frame by a dead Kotlin frame can be a valid record address. The record then belongs to
+// another function than the pc of the frame, so the frame is not scanned.
+TEST_F(MarkAndSweepUtilsDeltaMainTest, FrameWithRecordOfAnotherFunctionIsSkipped) {
+    Object ignored, caller;
+    FakeFrame frames[3];
+    linkFrames(frames, 3);
+    frames[0].slots[0] = ignored.header();
+    frames[2].slots[0] = caller.header();
+    declareFrameMap(frames[1], 1);
+    frames[0].record = frames[1].record;
+    declareFrameMap(frames[2], 2);
     pushAnchor(frames[0], 0);
 
     walk();
@@ -394,7 +408,7 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, SameObjectInSeveralSlotsIsMarkedOnce) {
     linkFrames(frames, 1);
     frames[0].slots[0] = a.header();
     frames[0].slots[2] = a.header();
-    declareFrameMap(0);
+    declareFrameMap(frames[0], 0);
     pushAnchor(frames[0], 0);
 
     walk();
@@ -408,7 +422,7 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, ObjectsReachableFromRootsAreMarkedToo) {
     FakeFrame frames[1];
     linkFrames(frames, 1);
     frames[0].slots[0] = root.header();
-    declareFrameMap(0);
+    declareFrameMap(frames[0], 0);
     pushAnchor(frames[0], 0);
 
     walk();
@@ -422,7 +436,7 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, BrokenChainIsAFatalError) {
     FakeFrame frames[2];
     linkFrames(frames, 2);
     frames[0].slots[0] = a.header();
-    declareFrameMap(0);
+    declareFrameMap(frames[0], 0);
     // The frame record of the anchor frame points at itself.
     frames[0].savedFp = reinterpret_cast<uint64_t>(frames[0].fp());
     pushAnchor(frames[0], 0);
@@ -438,7 +452,7 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, LinkOutsideOfTheStackIsAFatalError) {
     FakeFrame frames[1];
     linkFrames(frames, 1);
     frames[0].slots[0] = a.header();
-    declareFrameMap(0);
+    declareFrameMap(frames[0], 0);
     // stackHigh is exclusive, so a record exactly there is already outside. Rounded up to keep the 16-byte alignment.
     frames[0].savedFp = (reinterpret_cast<uintptr_t>(thread().stackHigh()) + 15) & ~uintptr_t{15};
     pushAnchor(frames[0], 0);
