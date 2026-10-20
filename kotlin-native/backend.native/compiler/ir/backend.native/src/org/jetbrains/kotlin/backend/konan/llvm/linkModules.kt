@@ -7,6 +7,9 @@ package org.jetbrains.kotlin.backend.konan.llvm
 
 import llvm.*
 import org.jetbrains.kotlin.backend.konan.NativeGenerationState
+import org.jetbrains.kotlin.config.nativeBinaryOptions.GCStackMapScheme
+
+private val dataLayoutMismatch = Regex("""^linking two modules of different data layouts: .* is '([^']*)' whereas .* is '([^']*)'""", RegexOption.IGNORE_CASE)
 
 internal fun llvmLinkModules2(generationState: NativeGenerationState, dest: LLVMModuleRef, src: LLVMModuleRef): LLVMBool {
     val diagnosticHandler = DefaultLlvmDiagnosticHandler(generationState, generationState.diagnosticReporter, object : DefaultLlvmDiagnosticHandler.Policy {
@@ -19,6 +22,13 @@ internal fun llvmLinkModules2(generationState: NativeGenerationState, dest: LLVM
             // and then linked by the compiler altogether.
             // Just ignore such warnings for now:
             if (diagnostic.message.startsWith("linking module flags 'SDK Version': IDs have conflicting values")) return true
+
+            // The delta-main data layout is the stock one plus `-ni:1`, the address space of the managed references.
+            // Bitcode that is built without it (a native library, C stubs of a stock clang) never uses that address space.
+            if (generationState.config.gcStackMapScheme == GCStackMapScheme.DELTA_MAIN) {
+                val [sourceLayout, destinationLayout] = dataLayoutMismatch.find(diagnostic.message)?.destructured ?: return false
+                if (destinationLayout == "$sourceLayout-ni:1") return true
+            }
 
             return false
         }
