@@ -1,4 +1,6 @@
 // TARGET_BACKEND: NATIVE
+// The checks forward the result slot of a runtime call. The delta-main scheme has no result slot: callers pass null.
+// DISABLE_NATIVE: gcStackMapScheme=DELTA_MAIN
 // FILECHECK_STAGE: CStubs
 
 import kotlin.reflect.KFunction2
