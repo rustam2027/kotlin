@@ -1,4 +1,6 @@
 // TARGET_BACKEND: NATIVE
+// This test is about the default (shadow stack) scheme. A run with -Xbinary=gcStackMapScheme=delta-main sets the scheme for every test.
+// DISABLE_NATIVE: gcStackMapScheme=DELTA_MAIN
 // FILECHECK_STAGE: CStubs
 // FREE_COMPILER_ARGS: -opt-in=kotlin.experimental.ExperimentalNativeApi
 

@@ -1,4 +1,6 @@
 // TARGET_BACKEND: NATIVE
+// EnterFrame is created by the shadow stack scheme only, there is no frame in the delta-main scheme.
+// DISABLE_NATIVE: gcStackMapScheme=DELTA_MAIN
 // FILECHECK_STAGE: CStubs
 
 object A {

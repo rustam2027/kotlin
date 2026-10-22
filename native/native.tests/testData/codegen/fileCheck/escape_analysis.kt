@@ -1,4 +1,6 @@
 // TARGET_BACKEND: NATIVE
+// Escape analysis is turned off for the delta-main scheme, nothing is allocated on the stack.
+// DISABLE_NATIVE: gcStackMapScheme=DELTA_MAIN
 // FILECHECK_STAGE: CStubs
 // IGNORE_NATIVE: optimizationMode=OPT && cacheMode=STATIC_ONLY_DIST
 // IGNORE_NATIVE: optimizationMode=OPT && cacheMode=STATIC_EVERYWHERE
