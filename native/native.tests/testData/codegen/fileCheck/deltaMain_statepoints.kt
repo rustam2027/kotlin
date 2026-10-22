@@ -8,7 +8,7 @@
 // DISABLE_NATIVE: gcType=STWMS
 // DISABLE_NATIVE: gcType=PMCS
 // DISABLE_NATIVE: optimizationMode=DEBUG
-// FILECHECK_STAGE: LTOBitcodeOptimization
+// FILECHECK_STAGE: RewriteStatepointsForGC
 // FREE_COMPILER_ARGS: -Xbinary=gcStackMapScheme=delta-main
 // FREE_COMPILER_ARGS: -opt-in=kotlin.experimental.ExperimentalNativeApi
 
