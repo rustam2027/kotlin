@@ -233,6 +233,7 @@ sealed interface TestRunCheck {
                     add("CHECK")
                     add("CHECK-${testTarget.abiInfoString}")
                     add("CHECK-${testTarget.name.toUpperCaseAsciiOnly()}")
+                    add("CHECK-${(settings.get<ExplicitBinaryOptions>().getOrNull<GCStackMapScheme>(BinaryOptions.gcStackMapScheme) ?: GCStackMapScheme.SHADOW_STACK).name}")
                     if (testTarget.family.isAppleFamily) {
                         add("CHECK-APPLE")
                     }
@@ -281,17 +282,6 @@ sealed interface TestRunCheck {
             } else Result.Passed
         }
 
-        // The delta-main scheme marks managed references as `ptr addrspace(1)`, the other schemes use `ptr`.
-        // The checks are written for `ptr`, so the dump is matched with `addrspace(1)` removed.
-        // A test that mentions `addrspace(` itself (deltaMain_*) checks the address space and gets the dump as is.
-        private fun withoutManagedAddressSpace(fileCheckDump: File): File {
-            val scheme = settings.get<ExplicitBinaryOptions>().getOrNull<GCStackMapScheme>(BinaryOptions.gcStackMapScheme)
-            if (scheme != GCStackMapScheme.DELTA_MAIN || "addrspace(" in testDataFile.readText()) return fileCheckDump
-            return File(fileCheckDump.path + ".noaddrspace").also {
-                it.writeText(fileCheckDump.readText().replace(" addrspace(1)", ""))
-            }
-        }
-
         internal fun doFileCheck(fileCheckDump: File): RunProcessResult {
             val fileCheckExecutable = settings.configurables.absoluteLlvmHome + File.separator + "bin" + File.separator +
                     if (SystemInfo.isWindows) "FileCheck.exe" else "FileCheck"
@@ -304,7 +294,7 @@ sealed interface TestRunCheck {
                     fileCheckExecutable,
                     testDataFile.absolutePath,
                     "--input-file",
-                    withoutManagedAddressSpace(fileCheckDump).absolutePath,
+                    fileCheckDump.absolutePath,
                     "--check-prefixes", prefixes,
                     "--allow-unused-prefixes",
                     "--allow-deprecated-dag-overlap" // TODO specify it via new test directive for `function_attributes_at_callsite.kt`
