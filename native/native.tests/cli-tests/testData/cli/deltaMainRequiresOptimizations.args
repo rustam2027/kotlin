@@ -1,6 +1,0 @@
-$TESTDATA_DIR$/simple.kt
--target
-macos_arm64
--Xbinary=gcStackMapScheme=delta-main
--o
-$TEMP_DIR$/deltaMainRequiresOptimizations
