@@ -5,6 +5,7 @@
 
 package org.jetbrains.kotlin.backend.konan.llvm
 
+import kotlinx.cinterop.signExtend
 import kotlinx.cinterop.toCValues
 import kotlinx.cinterop.toKString
 import llvm.*
@@ -614,6 +615,29 @@ internal class CodegenLlvmHelpers(private val generationState: NativeGenerationS
             0 to importMemset(0),
             1 to importMemset(1)
     )
+
+    val lifetimeStartFunction = llvmIntrinsic(
+            "llvm.lifetime.start.p${runtime.kotlinObjectAddressSpace}",
+            functionType(voidType, false, int64Type, kotlinObjectPtrType),
+            "nounwind"
+    )
+
+    val stackObjectBarrierType = functionType(voidType, false, kotlinObjectPtrType)
+
+    val stackObjectBarrier: LLVMValueRef by lazy {
+        val constraints = "r,~{memory}"
+        LLVMGetInlineAsm(
+                Ty = stackObjectBarrierType,
+                AsmString = "",
+                AsmStringSize = 0,
+                Constraints = constraints,
+                ConstraintsSize = constraints.length.signExtend(),
+                HasSideEffects = 1,
+                IsAlignStack = 0,
+                Dialect = LLVMInlineAsmDialect.LLVMInlineAsmDialectATT,
+                CanThrow = 0,
+        )!!
+    }
 
     val llvmTrap = llvmIntrinsic(
             "llvm.trap",

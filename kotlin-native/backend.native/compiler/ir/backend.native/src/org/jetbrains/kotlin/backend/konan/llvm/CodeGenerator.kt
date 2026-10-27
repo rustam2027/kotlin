@@ -397,6 +397,7 @@ internal class StackLocalsManagerImpl(
     override fun enterScope() { scopeDepth++ }
     override fun exitScope() { scopeDepth-- }
     private fun isRootScope() = scopeDepth == 0
+    private val deltaMain = functionGenerationContext.context.config.gcStackMapScheme == GCStackMapScheme.DELTA_MAIN
 
     private class StackLocal(
             val arraySize: Int?,
@@ -416,24 +417,33 @@ internal class StackLocalsManagerImpl(
     private fun FunctionGenerationContext.createRootSetSlot() =
             alloca(llvm.pointerType, true)
 
+    private fun initObject(slot: LLVMValueRef, type: LLVMTypeRef, irClass: IrClass, size: Int) =
+            with(functionGenerationContext) {
+                memset(slot, 0, size)
+                val header = structGep(type, slot, 0, "objHeader")
+                setTypeInfoForStackObject(runtime.objHeaderType, header, codegen.typeInfoForAllocation(irClass))
+                header
+            }
+
     override fun alloc(irClass: IrClass): LLVMValueRef = with(functionGenerationContext) {
         val classInfo = llvmDeclarations.forClass(irClass)
         val type = classInfo.bodyType.llvmBodyType
-        val stackLocal = appendingTo(bbInitStackLocals) {
-            val stackSlot = LLVMBuildAllocaInAddrspace(builder, type, "", runtime.kotlinObjectAddressSpace)!!
-            LLVMSetAlignment(stackSlot, classInfo.alignment)
-
-            memset(stackSlot, 0, LLVMSizeOfTypeInBits(codegen.llvmTargetData, type).toInt() / 8)
-
-            val objectHeader = structGep(type, stackSlot, 0, "objHeader")
-            val typeInfo = codegen.typeInfoForAllocation(irClass)
-            setTypeInfoForStackObject(runtime.objHeaderType, objectHeader, typeInfo)
-            val gcRootSetSlot = createRootSetSlot()
-            StackLocal(null, irClass, stackSlot, objectHeader, gcRootSetSlot)
+        val size = LLVMSizeOfTypeInBits(codegen.llvmTargetData, type).toInt() / 8
+        val stackSlot = appendingTo(bbInitStackLocals) {
+            val slot = LLVMBuildAllocaInAddrspace(builder, type, "", runtime.kotlinObjectAddressSpace)!!
+            LLVMSetAlignment(slot, classInfo.alignment)
+            slot
         }
+        val objectHeader = if (deltaMain) {
+            lifetimeStart(size, stackSlot)
+            initObject(stackSlot, type, irClass, size).also { escapeStackObject(stackSlot) }
+        } else {
+            appendingTo(bbInitStackLocals) { initObject(stackSlot, type, irClass, size) }
+        }
+        val stackLocal = StackLocal(null, irClass, stackSlot, objectHeader, createRootSetSlot())
 
         stackLocals += stackLocal
-        if (!isRootScope()) {
+        if (!isRootScope() && !deltaMain) {
             clean(stackLocal, false)
         }
         if (stackLocal.gcRootSetSlot != null) {
@@ -473,29 +483,35 @@ internal class StackLocalsManagerImpl(
             irBuiltIns.booleanArray to llvm.int8Type
     )
 
-    override fun allocArray(irClass: IrClass, count: LLVMValueRef) = with(functionGenerationContext) {
-        val stackLocal = appendingTo(bbInitStackLocals) {
-            val constCount = extractConstUnsignedInt(count).toInt()
-            val arrayType = localArrayType(irClass, constCount)
-            val typeInfo = codegen.typeInfoValue(irClass)
-            val arraySlot = LLVMBuildAllocaInAddrspace(builder, arrayType, "", runtime.kotlinObjectAddressSpace)!!
-            // Set array size in ArrayHeader.
-            val arrayHeaderSlot = structGep(arrayType, arraySlot, 0, "arrayHeader")
-            setTypeInfoForStackObject(runtime.arrayHeaderType, arrayHeaderSlot, typeInfo)
-            val sizeField = structGep(runtime.arrayHeaderType, arrayHeaderSlot, 1, "count_")
-            store(count, sizeField)
+    private fun initArray(slot: LLVMValueRef, arrayType: LLVMTypeRef, irClass: IrClass, constCount: Int,
+                          count: LLVMValueRef) = with(functionGenerationContext) {
+        val header = structGep(arrayType, slot, 0, "arrayHeader")
+        setTypeInfoForStackObject(runtime.arrayHeaderType, header, codegen.typeInfoValue(irClass))
+        store(count, structGep(runtime.arrayHeaderType, header, 1, "count_"))
+        memset(structGep(arrayType, slot, 1, "arrayBody"),
+                0,
+                constCount * LLVMSizeOfTypeInBits(codegen.llvmTargetData, arrayToElementType[irClass.symbol]).toInt() / 8
+        )
+        header
+    }
 
-            memset(structGep(arrayType, arraySlot, 1, "arrayBody"),
-                    0,
-                    constCount * LLVMSizeOfTypeInBits(codegen.llvmTargetData, arrayToElementType[irClass.symbol]).toInt() / 8
-            )
-            val gcRootSetSlot = createRootSetSlot()
-            StackLocal(constCount, irClass, arraySlot, arrayHeaderSlot, gcRootSetSlot)
+    override fun allocArray(irClass: IrClass, count: LLVMValueRef) = with(functionGenerationContext) {
+        val constCount = extractConstUnsignedInt(count).toInt()
+        val arrayType = localArrayType(irClass, constCount)
+        val arraySlot = appendingTo(bbInitStackLocals) {
+            LLVMBuildAllocaInAddrspace(builder, arrayType, "", runtime.kotlinObjectAddressSpace)!!
         }
+        val arrayHeaderSlot = if (deltaMain) {
+            lifetimeStart(LLVMSizeOfTypeInBits(codegen.llvmTargetData, arrayType).toInt() / 8, arraySlot)
+            initArray(arraySlot, arrayType, irClass, constCount, count).also { escapeStackObject(arraySlot) }
+        } else {
+            appendingTo(bbInitStackLocals) { initArray(arraySlot, arrayType, irClass, constCount, count) }
+        }
+        val stackLocal = StackLocal(constCount, irClass, arraySlot, arrayHeaderSlot, createRootSetSlot())
 
         stackLocals += stackLocal
         val result = stackLocal.objHeaderPtr
-        if (!isRootScope()) {
+        if (!isRootScope() && !deltaMain) {
             clean(stackLocal, false)
         }
         if (stackLocal.gcRootSetSlot != null) {
@@ -826,6 +842,12 @@ internal abstract class FunctionGenerationContext(
             }.let {} // Force exhaustive.
         }
     }
+
+    fun lifetimeStart(size: Int, pointer: LLVMValueRef) =
+            call(llvm.lifetimeStartFunction, listOf(llvm.int64(size.toLong()), pointer))
+
+    fun escapeStackObject(pointer: LLVMValueRef) =
+            LLVMBuildCall2(builder, llvm.stackObjectBarrierType, llvm.stackObjectBarrier, cValuesOf(pointer), 1, "")
 
     fun memset(pointer: LLVMValueRef, value: Byte, size: Int, isVolatile: Boolean = false) =
             call(llvm.memsetFunction.getValue(LLVMGetPointerAddressSpace(LLVMTypeOf(pointer))),
