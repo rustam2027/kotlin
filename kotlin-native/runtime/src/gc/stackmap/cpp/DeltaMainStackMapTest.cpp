@@ -311,8 +311,8 @@ std::optional<std::vector<int32_t>> lookupCollected(const DeltaMainStackMap& map
 
 TEST(DeltaMainCollectTest, FindsEveryCallOfEveryFunction) {
     FakeStackMapSection section;
-    section.addRecord(0x100, 0x40, bytes({{0x78}, {32}, {0b11}, {2}, {12, 0}, {20, 1}, {0}, {0b01}}));
-    section.addRecord(0x200, 0x40, bytes({{0x70}, {48}, {0b1}, {1}, {4, 0}, {0}}));
+    section.addRecord(0x100, 0x40, bytes({{0x78}, {32}, {0b11}, {0}, {2}, {12, 0}, {20, 1}, {0}, {0}, {0b01}, {0}}));
+    section.addRecord(0x200, 0x40, bytes({{0x70}, {48}, {0b1}, {0}, {1}, {4, 0}, {0}, {0}}));
     auto map = section.map(false);
     map.collect();
 
