@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -22,6 +23,7 @@
 #include "ObjectTestSupport.hpp"
 #include "TestSupport.hpp"
 #include "Utils.hpp"
+#include "mm/ObjectOps.hpp"
 
 using namespace kotlin;
 
@@ -94,7 +96,9 @@ RecordingMarkTraits* RecordingMarkTraits::instance_ = nullptr;
 // is at fp. Root slot `i` is at `fp - 48 + 8 * i`, i.e. at the offsets -48, -40, -32, -24.
 struct alignas(16) FakeFrame {
     static constexpr size_t kSlots = 4;
+    static constexpr uint8_t kDirectObjectMask = 1 << (kSlots - 1);
 
+    // A Direct object reuses the storage of slots 0 and 1; slots 2 and 3 remain independent Indirect slots.
     ObjHeader* slots[kSlots];
     uint64_t record;
     uint64_t padding;
@@ -102,10 +106,17 @@ struct alignas(16) FakeFrame {
     uint64_t returnPc;
 
     uint64_t* fp() { return &savedFp; }
+
+    Object& emplaceStackObject() {
+        auto* object = new (static_cast<void*>(&slots[0])) Object;
+        object->header()->typeInfoOrMeta_ = setPointerBits(object->header()->typeInfoOrMeta_, OBJECT_TAG_STACK);
+        return *object;
+    }
 };
 static_assert(sizeof(FakeFrame) % 16 == 0);
 static_assert(offsetof(FakeFrame, savedFp) == (FakeFrame::kSlots + 2) * sizeof(ObjHeader*));
 static_assert(offsetof(FakeFrame, record) == offsetof(FakeFrame, savedFp) - 16);
+static_assert(sizeof(Object) == 2 * sizeof(ObjHeader*));
 
 constexpr size_t kFunctionSize = 0x100;
 constexpr size_t kCallOffset = 0x10;
@@ -137,11 +148,11 @@ public:
 
     mm::ThreadData& thread() { return *memoryInit_.memoryState()->GetThreadData(); }
 
-    // The stack map says that the slots from `liveSet` hold GC roots; bit `i` is the slot at `baseOffset - 8 * i`.
-    // By default, all four slots of the frame hold GC roots.
-    void declareFrameMap(FakeFrame& frame, size_t frameIndex, uint8_t baseOffset = 0x68, uint8_t liveSet = 0b1111) {
+    // Bit `i` in either set is the location at `baseOffset - 8 * i`: Indirect reads a slot,
+    // while Direct points at an embedded object. By default all four Indirect slots are live.
+    void declareFrameMap(FakeFrame& frame, size_t frameIndex, uint8_t baseOffset = 0x68, uint8_t indirectSet = 0b1111, uint8_t directSet = 0) {
         frame.record = section_.addRecord(kFunctionSize * frameIndex, kFunctionSize,
-                stackMap::test::bytes({{baseOffset}, {32}, {liveSet}, {0}, {1}, {static_cast<uint8_t>(kCallOffset), 0}, {0}, {0}}));
+                stackMap::test::bytes({{baseOffset}, {32}, {indirectSet}, {directSet}, {1}, {static_cast<uint8_t>(kCallOffset), 0}, {0}, {0}}));
     }
 
     void pushAnchor(FakeFrame& frame, size_t frameIndex) {
@@ -279,6 +290,58 @@ TEST_F(MarkAndSweepUtilsDeltaMainTest, OnlySlotsFromTheMapAreRoots) {
     walk();
 
     EXPECT_THAT(marked(), Objects({a}));
+}
+
+TEST_F(MarkAndSweepUtilsDeltaMainTest, CollectsDirectStackObject) {
+    FakeFrame frames[1];
+    linkFrames(frames, 1);
+    auto& root = frames[0].emplaceStackObject();
+
+    ObjHolder child;
+    mm::AllocateObject(&thread(), typeHolder.typeInfo(), child.slot());
+    root->field = child.obj();
+    ASSERT_TRUE(root.header()->stack());
+    ASSERT_TRUE(child.obj()->heap());
+    declareFrameMap(frames[0], 0, 0x68, 0, FakeFrame::kDirectObjectMask);
+    pushAnchor(frames[0], 0);
+
+    walk();
+
+    // Direct points at the whole stack object; scanning its header reaches the heap field.
+    EXPECT_THAT(enqueued(), testing::ElementsAre(child.obj()));
+}
+
+TEST_F(MarkAndSweepUtilsDeltaMainTest, CollectsValAndCurrentVarFromIndirectSlots) {
+    Object val, var;
+    FakeFrame frames[1];
+    linkFrames(frames, 1);
+    frames[0].slots[0] = val.header();
+    frames[0].slots[1] = var.header();
+    declareFrameMap(frames[0], 0, 0x68, 0b1100);
+    pushAnchor(frames[0], 0);
+
+    walk();
+
+    EXPECT_THAT(enqueued(), testing::UnorderedElementsAre(val.header(), var.header()));
+}
+
+TEST_F(MarkAndSweepUtilsDeltaMainTest, CollectsDirectAndIndirectRootsFromTheSameFrame) {
+    Object indirect0, indirect1;
+    FakeFrame frames[1];
+    linkFrames(frames, 1);
+    auto& direct = frames[0].emplaceStackObject();
+
+    ObjHolder child;
+    mm::AllocateObject(&thread(), typeHolder.typeInfo(), child.slot());
+    direct->field = child.obj();
+    frames[0].slots[2] = indirect0.header();
+    frames[0].slots[3] = indirect1.header();
+    declareFrameMap(frames[0], 0, 0x68, 0b0011, FakeFrame::kDirectObjectMask);
+    pushAnchor(frames[0], 0);
+
+    walk();
+
+    EXPECT_THAT(enqueued(), testing::UnorderedElementsAre(indirect0.header(), indirect1.header(), child.obj()));
 }
 
 TEST_F(MarkAndSweepUtilsDeltaMainTest, WalksFromTheAnchorTowardsTheOldestFrame) {
