@@ -849,6 +849,12 @@ internal abstract class FunctionGenerationContext(
     fun escapeStackObject(pointer: LLVMValueRef) =
             LLVMBuildCall2(builder, llvm.stackObjectBarrierType, llvm.stackObjectBarrier, cValuesOf(pointer), 1, "")
 
+    private fun concealRef(value: LLVMValueRef) =
+            LLVMBuildCall2(builder, llvm.concealRefType, llvm.concealRef, cValuesOf(value), 1, "")!!
+
+    private fun publishRef(value: LLVMValueRef) =
+            LLVMBuildCall2(builder, llvm.publishRefType, llvm.publishRef, cValuesOf(value), 1, "")!!
+
     fun memset(pointer: LLVMValueRef, value: Byte, size: Int, isVolatile: Boolean = false) =
             call(llvm.memsetFunction.getValue(LLVMGetPointerAddressSpace(LLVMTypeOf(pointer))),
                     listOf(pointer,
@@ -864,13 +870,21 @@ internal abstract class FunctionGenerationContext(
             verbatim: Boolean = false,
             resultSlot: LLVMValueRef? = null,
     ): LLVMValueRef {
+        // Runtime functions are imported with true plain-pointer signatures (see importFunction),
+        // so bridge addrspace(1) args/results across the call for the object params declared by
+        // importRtFunction; the sideeffect asm is not movable across safepoints.
+        val bridgeable = (llvmCallable as? LlvmFunction.Declaration)
+                ?.takeIf { context.config.gcStackMapScheme == GCStackMapScheme.DELTA_MAIN }
+        val objectParams = bridgeable?.objectParams.orEmpty()
+        val bridgedArgs = if (objectParams.isEmpty()) args
+        else args.mapIndexed { index, arg -> if (index in objectParams) concealRef(arg) else arg }
         val callArgs = if (verbatim || !llvmCallable.returnsObjectType) {
-            args
+            bridgedArgs
         } else if (context.config.gcStackMapScheme == GCStackMapScheme.DELTA_MAIN) {
             // The return-slot out-parameter is unused under delta-main (RS4GC tracks the
             // returned object via the ordinary SSA return value) - always pass null instead of
             // allocating a stack/arena slot for it.
-            args + llvm.kNull
+            bridgedArgs + llvm.kNull
         } else {
             // If function returns an object - create slot for the returned value or give local arena.
             // This allows appropriate rootset accounting by just looking at the stack slots,
@@ -893,9 +907,10 @@ internal abstract class FunctionGenerationContext(
 
                 else -> throw Error("Incorrect slot type: ${resultLifetime.slotType}")
             }
-            args + realResultSlot
+            bridgedArgs + realResultSlot
         }
-        return callRaw(llvmCallable, callArgs, exceptionHandler)
+        val result = callRaw(llvmCallable, callArgs, exceptionHandler)
+        return if (bridgeable?.objectReturnType == true) publishRef(result) else result
     }
 
     private fun callRaw(

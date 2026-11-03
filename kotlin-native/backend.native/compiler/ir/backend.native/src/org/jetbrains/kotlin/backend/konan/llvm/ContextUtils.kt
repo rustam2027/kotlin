@@ -343,20 +343,18 @@ internal class CodegenLlvmHelpers(private val generationState: NativeGenerationS
 
         val attributesCopier = LlvmFunctionAttributeProvider.copyFromExternal(externalFunction)
 
-        val rawFunctionType = getGlobalFunctionType(externalFunction)
-        val paramCount = LLVMCountParams(externalFunction)
-
-        val paramTypes = (0 until paramCount).map { i ->
-            if (i in objectParams) kotlinObjectPtrType else LLVMTypeOf(LLVMGetParam(externalFunction, i)!!)!!
-        }
-        val returnType = if (objectReturnType) kotlinObjectPtrType else LLVMGetReturnType(rawFunctionType)!!
-        val functionType = functionType(returnType, LLVMIsFunctionVarArg(rawFunctionType) != 0, paramTypes)
+        // Import with the true runtime signature: a call to an addrspace(1)-rewritten declaration
+        // never inlines, because LLVM requires call and definition types to match. The
+        // addrspace(1) bridge for object params/result happens at the call site (see
+        // FunctionGenerationContext.call and concealRef/publishRef).
+        val functionType = getGlobalFunctionType(externalFunction)
 
         val function = LLVMAddFunction(module, name, functionType)!!
 
         attributesCopier.addFunctionAttributes(function)
 
-        return LlvmFunction.Declaration(functionType, returnsObjectType, function, attributesCopier)
+        return LlvmFunction.Declaration(functionType, returnsObjectType, function, attributesCopier,
+                objectParams, objectReturnType)
     }
 
     private fun importMemset(addrSpace: Int): LlvmCallable {
@@ -638,6 +636,30 @@ internal class CodegenLlvmHelpers(private val generationState: NativeGenerationS
                 CanThrow = 0,
         )!!
     }
+
+    // conceal_ref/publish_ref: zero-instruction sideeffect inline asm bridging addrspace(1) and
+    // plain pointers at runtime-call boundaries. Opaque to LLVM, so the conversion cannot be
+    // moved across safepoints; the plain-value window is as narrow as with an AS1 signature.
+    val concealRefType = functionType(pointerType, false, kotlinObjectPtrType)
+    val publishRefType = functionType(kotlinObjectPtrType, false, pointerType)
+
+    private fun refBridgeAsm(type: LLVMTypeRef, asmString: String): LLVMValueRef {
+        val constraints = "=r,0"
+        return LLVMGetInlineAsm(
+                Ty = type,
+                AsmString = asmString,
+                AsmStringSize = asmString.length.signExtend(),
+                Constraints = constraints,
+                ConstraintsSize = constraints.length.signExtend(),
+                HasSideEffects = 1,
+                IsAlignStack = 0,
+                Dialect = LLVMInlineAsmDialect.LLVMInlineAsmDialectATT,
+                CanThrow = 0,
+        )!!
+    }
+
+    val concealRef: LLVMValueRef by lazy { refBridgeAsm(concealRefType, "// conceal_ref") }
+    val publishRef: LLVMValueRef by lazy { refBridgeAsm(publishRefType, "// publish_ref") }
 
     val llvmTrap = llvmIntrinsic(
             "llvm.trap",
