@@ -8,9 +8,7 @@ class A(val x: Int)
 // CHECK-LABEL: define ptr{{( addrspace\(1\))?}} @"kfun:#box(){}kotlin.String"
 fun box(): String {
     // CHECK-DEBUG: call ptr{{( addrspace\(1\))?}} @AllocInstance
-    // Escape analysis is turned off for the delta-main scheme, nothing is allocated on the stack.
-    // CHECK-SHADOW_STACK-OPT: alloca %"kclassbody:A#internal"
-    // CHECK-DELTA_MAIN-OPT: call ptr{{( addrspace\(1\))?}} @AllocInstance
+    // CHECK-OPT: alloca %"kclassbody:A#internal"
     val a = A(5)
     println(a.x)
 // CHECK-LABEL: epilogue:
