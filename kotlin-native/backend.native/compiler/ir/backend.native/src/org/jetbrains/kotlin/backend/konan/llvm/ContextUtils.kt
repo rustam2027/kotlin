@@ -5,6 +5,9 @@
 
 package org.jetbrains.kotlin.backend.konan.llvm
 
+import kotlinx.cinterop.allocArray
+import kotlinx.cinterop.get
+import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.signExtend
 import kotlinx.cinterop.toCValues
 import kotlinx.cinterop.toKString
@@ -374,15 +377,56 @@ internal class CodegenLlvmHelpers(private val generationState: NativeGenerationS
         return LlvmFunction.Declaration(type, false, result, LlvmFunctionAttributeProvider.copyFromExternal(result))
     }
 
+    private fun isObjectPointerType(type: LLVMTypeRef): Boolean =
+            LLVMGetTypeKind(type) == LLVMTypeKind.LLVMPointerTypeKind &&
+                    LLVMGetPointerAddressSpace(type) == runtime.kotlinObjectAddressSpace
+
+    // Param indices whose type is addrspace(1) in the expected signature but plain in the found
+    // runtime signature; such params are bridged with concealRef at call sites.
+    private fun bridgedObjectParams(foundType: LLVMTypeRef, signature: LlvmFunctionSignature): List<Int> {
+        val expectedParams = signature.parameterTypes
+        val paramCount = LLVMCountParamTypes(foundType)
+        require(paramCount == expectedParams.size) {
+            "Inconsistent function type: ${expectedParams.size} params expected, but the runtime declaration has $paramCount"
+        }
+        val foundParams = memScoped {
+            val buffer = allocArray<LLVMTypeRefVar>(paramCount.toLong())
+            LLVMGetParamTypes(foundType, buffer)
+            (0 until paramCount).map { buffer[it]!! }
+        }
+        val objectParams = mutableListOf<Int>()
+        expectedParams.zip(foundParams).forEachIndexed { index, params ->
+            val expected = params.first.llvmType
+            val found = params.second
+            if (expected != found) {
+                require(isObjectPointerType(expected) &&
+                        LLVMGetTypeKind(found) == LLVMTypeKind.LLVMPointerTypeKind) {
+                    "Inconsistent function type of param $index"
+                }
+                objectParams += index
+            }
+        }
+        return objectParams
+    }
+
     internal fun externalFunction(llvmFunctionProto: LlvmFunctionProto): LlvmFunction {
         if (llvmFunctionProto.origin != null) {
             this.dependenciesTracker.add(llvmFunctionProto.origin, onlyBitcode = llvmFunctionProto.independent)
         }
         val found = LLVMGetNamedFunction(module, llvmFunctionProto.name)
         if (found != null) {
-            require(getGlobalFunctionType(found) == llvmFunctionProto.signature.llvmFunctionType) {
-                "Inconsistent function type of ${llvmFunctionProto.name}. Expected: ${llvmFunctionProto.signature.llvmFunctionType.toTypeString()}, " +
-                        "found: ${getGlobalFunctionType(found).toTypeString()}"
+            val foundType = getGlobalFunctionType(found)
+            if (foundType != llvmFunctionProto.signature.llvmFunctionType) {
+                // The function is already imported from the runtime with its true plain-pointer
+                // signature (importFunction). Declare it with the found type and record the
+                // addrspace(1) bridge for object params/result, so calls match the runtime
+                // definition and can be inlined.
+                require(LLVMGetLinkage(found) == llvmFunctionProto.linkage)
+                val objectParams = bridgedObjectParams(foundType, llvmFunctionProto.signature)
+                val objectReturnType = isObjectPointerType(llvmFunctionProto.signature.returnType.llvmType) &&
+                        !isObjectPointerType(LLVMGetReturnType(foundType)!!)
+                return LlvmFunction.Declaration(foundType, llvmFunctionProto.signature.returnsObjectType, found,
+                        llvmFunctionProto.signature, objectParams, objectReturnType)
             }
             require(LLVMGetLinkage(found) == llvmFunctionProto.linkage)
             return LlvmFunction.Declaration(found, llvmFunctionProto.signature)
