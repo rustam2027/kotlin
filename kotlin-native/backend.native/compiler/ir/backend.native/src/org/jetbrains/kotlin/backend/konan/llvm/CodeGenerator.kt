@@ -397,6 +397,7 @@ internal class StackLocalsManagerImpl(
     override fun enterScope() { scopeDepth++ }
     override fun exitScope() { scopeDepth-- }
     private fun isRootScope() = scopeDepth == 0
+    private val deltaMain = functionGenerationContext.context.config.gcStackMapScheme == GCStackMapScheme.DELTA_MAIN
 
     private class StackLocal(
             val arraySize: Int?,
@@ -416,21 +417,34 @@ internal class StackLocalsManagerImpl(
     private fun FunctionGenerationContext.createRootSetSlot() =
             alloca(llvm.pointerType, true)
 
+    private fun initObject(slot: LLVMValueRef, type: LLVMTypeRef, irClass: IrClass, size: Int) =
+            with(functionGenerationContext) {
+                memset(slot, 0, size)
+                val header = structGep(type, slot, 0, "objHeader")
+                setTypeInfoForStackObject(runtime.objHeaderType, header, codegen.typeInfoForAllocation(irClass))
+                header
+            }
+
     override fun alloc(irClass: IrClass): LLVMValueRef = with(functionGenerationContext) {
         val classInfo = llvmDeclarations.forClass(irClass)
         val type = classInfo.bodyType.llvmBodyType
-        val stackLocal = appendingTo(bbInitStackLocals) {
-            val stackSlot = LLVMBuildAllocaInAddrspace(builder, type, "", runtime.kotlinObjectAddressSpace)!!
-            LLVMSetAlignment(stackSlot, classInfo.alignment)
-
-            memset(stackSlot, 0, LLVMSizeOfTypeInBits(codegen.llvmTargetData, type).toInt() / 8)
-
-            val objectHeader = structGep(type, stackSlot, 0, "objHeader")
-            val typeInfo = codegen.typeInfoForAllocation(irClass)
-            setTypeInfoForStackObject(runtime.objHeaderType, objectHeader, typeInfo)
-            val gcRootSetSlot = createRootSetSlot()
-            StackLocal(null, irClass, stackSlot, objectHeader, gcRootSetSlot)
+        val size = LLVMSizeOfTypeInBits(codegen.llvmTargetData, type).toInt() / 8
+        val stackSlot = appendingTo(bbInitStackLocals) {
+            val slot = if (deltaMain) {
+                LLVMBuildAlloca(builder, type, "")!!
+            } else {
+                LLVMBuildAllocaInAddrspace(builder, type, "", runtime.kotlinObjectAddressSpace)!!
+            }
+            LLVMSetAlignment(slot, classInfo.alignment)
+            slot
         }
+        val objectHeader = if (deltaMain) {
+            initObject(stackSlot, type, irClass, size)
+            publishRef(stackSlot)
+        } else {
+            appendingTo(bbInitStackLocals) { initObject(stackSlot, type, irClass, size) }
+        }
+        val stackLocal = StackLocal(null, irClass, stackSlot, objectHeader, createRootSetSlot())
 
         stackLocals += stackLocal
         if (!isRootScope()) {
@@ -473,25 +487,35 @@ internal class StackLocalsManagerImpl(
             irBuiltIns.booleanArray to llvm.int8Type
     )
 
-    override fun allocArray(irClass: IrClass, count: LLVMValueRef) = with(functionGenerationContext) {
-        val stackLocal = appendingTo(bbInitStackLocals) {
-            val constCount = extractConstUnsignedInt(count).toInt()
-            val arrayType = localArrayType(irClass, constCount)
-            val typeInfo = codegen.typeInfoValue(irClass)
-            val arraySlot = LLVMBuildAllocaInAddrspace(builder, arrayType, "", runtime.kotlinObjectAddressSpace)!!
-            // Set array size in ArrayHeader.
-            val arrayHeaderSlot = structGep(arrayType, arraySlot, 0, "arrayHeader")
-            setTypeInfoForStackObject(runtime.arrayHeaderType, arrayHeaderSlot, typeInfo)
-            val sizeField = structGep(runtime.arrayHeaderType, arrayHeaderSlot, 1, "count_")
-            store(count, sizeField)
+    private fun initArray(slot: LLVMValueRef, arrayType: LLVMTypeRef, irClass: IrClass, constCount: Int,
+                          count: LLVMValueRef) = with(functionGenerationContext) {
+        val header = structGep(arrayType, slot, 0, "arrayHeader")
+        setTypeInfoForStackObject(runtime.arrayHeaderType, header, codegen.typeInfoValue(irClass))
+        store(count, structGep(runtime.arrayHeaderType, header, 1, "count_"))
+        memset(structGep(arrayType, slot, 1, "arrayBody"),
+                0,
+                constCount * LLVMSizeOfTypeInBits(codegen.llvmTargetData, arrayToElementType[irClass.symbol]).toInt() / 8
+        )
+        header
+    }
 
-            memset(structGep(arrayType, arraySlot, 1, "arrayBody"),
-                    0,
-                    constCount * LLVMSizeOfTypeInBits(codegen.llvmTargetData, arrayToElementType[irClass.symbol]).toInt() / 8
-            )
-            val gcRootSetSlot = createRootSetSlot()
-            StackLocal(constCount, irClass, arraySlot, arrayHeaderSlot, gcRootSetSlot)
+    override fun allocArray(irClass: IrClass, count: LLVMValueRef) = with(functionGenerationContext) {
+        val constCount = extractConstUnsignedInt(count).toInt()
+        val arrayType = localArrayType(irClass, constCount)
+        val arraySlot = appendingTo(bbInitStackLocals) {
+            if (deltaMain) {
+                LLVMBuildAlloca(builder, arrayType, "")!!
+            } else {
+                LLVMBuildAllocaInAddrspace(builder, arrayType, "", runtime.kotlinObjectAddressSpace)!!
+            }
         }
+        val arrayHeaderSlot = if (deltaMain) {
+            initArray(arraySlot, arrayType, irClass, constCount, count)
+            publishRef(arraySlot)
+        } else {
+            appendingTo(bbInitStackLocals) { initArray(arraySlot, arrayType, irClass, constCount, count) }
+        }
+        val stackLocal = StackLocal(constCount, irClass, arraySlot, arrayHeaderSlot, createRootSetSlot())
 
         stackLocals += stackLocal
         val result = stackLocal.objHeaderPtr
@@ -838,7 +862,7 @@ internal abstract class FunctionGenerationContext(
                 LLVMGetPointerAddressSpace(type) == runtime.kotlinObjectAddressSpace
     }
 
-    private fun publishRef(value: LLVMValueRef) =
+    fun publishRef(value: LLVMValueRef) =
             llvm.publishRef.buildCall(builder, listOf(value))
 
     fun memset(pointer: LLVMValueRef, value: Byte, size: Int, isVolatile: Boolean = false) =
