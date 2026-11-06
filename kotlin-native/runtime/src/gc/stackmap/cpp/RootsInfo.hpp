@@ -13,10 +13,10 @@
 
 namespace kotlin::stackMap {
 
-/// A single GC root location: a stack slot or Direct (or
-/// a register), as decoded from a delta-main stack map (see
-/// DeltaMainStackMapEncoder::enumerate in the LLVM-side port for the
-/// register numbering this decodes).
+/// A single GC root location: a stack slot, either Indirect (the slot
+/// holds a reference) or Direct (the slot embeds the object), as decoded
+/// from a delta-main stack map (see DeltaMainStackMapEncoder::enumerate in
+/// the LLVM-side port for the register numbering this decodes).
 struct RootLocation {
     enum RootLocationType { Direct, Indirect };
 
