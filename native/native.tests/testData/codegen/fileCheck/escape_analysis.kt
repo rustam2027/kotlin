@@ -9,7 +9,7 @@ class A(val x: Int)
 fun box(): String {
     // CHECK-DEBUG: call ptr{{( addrspace\(1\))?}} @AllocInstance
     // CHECK-OPT: alloca %"kclassbody:A#internal"
-    // CHECK-OPT: call ptr addrspace(1) @llvm.kn.publish
+    // CHECK-DELTA_MAIN-OPT: call ptr addrspace(1) @llvm.kn.publish
     val a = A(5)
     println(a.x)
 // CHECK-LABEL: epilogue:
